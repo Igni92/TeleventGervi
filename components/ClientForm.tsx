@@ -297,7 +297,7 @@ export function ClientForm({ initialData, mode }: ClientFormProps) {
                 onClick={() => toggleJour(value)}
                 className={`h-9 w-12 rounded-lg border text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1 dark:focus:ring-offset-slate-900 ${
                   active
-                    ? "border-brand-500 bg-brand-500 text-white shadow-[0_2px_10px_-2px_hsl(var(--brand-500))]"
+                    ? "border-brand-500 bg-brand-500 text-black shadow-[0_2px_10px_-2px_hsl(var(--brand-500))]"
                     : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:border-brand-400 hover:text-brand-600 dark:hover:border-brand-500 dark:hover:text-brand-400"
                 }`}
               >

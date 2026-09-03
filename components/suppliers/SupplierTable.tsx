@@ -149,7 +149,7 @@ export function SupplierTable() {
               onClick={() => setActive(f.key)}
               className={`px-3 h-8 rounded-md text-[12.5px] font-medium transition-colors ${
                 active === f.key
-                  ? "bg-brand-500 text-white shadow-sm"
+                  ? "bg-brand-500 text-black shadow-sm"
                   : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
               }`}
             >

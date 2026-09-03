@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -178,6 +178,29 @@ const fmtDate = (s?: string): string => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${p(d.getFullYear() % 100)}`;
 };
+/** Regroupe des EM par JOUR de réception (docDate), ordre d'entrée conservé
+ *  (récent → ancien) → « JEU 03.09 › EM… » au lieu de répéter la date par ligne. */
+function groupByDay<T extends { docDate?: string | null }>(rows: T[]): { key: string; label: string; rows: T[] }[] {
+  const m = new Map<string, { key: string; label: string; rows: T[] }>();
+  for (const d of rows) {
+    const key = d.docDate?.slice(0, 10) || "—";
+    let g = m.get(key);
+    if (!g) { g = { key, label: key === "—" ? "Sans date" : fmtJourDate(d.docDate ?? undefined), rows: [] }; m.set(key, g); }
+    g.rows.push(d);
+  }
+  return [...m.values()];
+}
+/** Bandeau de jour — en-tête d'un groupe (« JEU 03.09.26 · 4 »). */
+function DayHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center gap-2 px-1">
+      <span className="text-[12px] font-bold uppercase tracking-wide text-foreground tnum">{label}</span>
+      <span className="text-[11px] font-semibold text-muted-foreground tnum">· {count}</span>
+      <span className="h-px flex-1 bg-border/70" />
+    </div>
+  );
+}
+
 /** Date + heure « JEU 08.07.26 · 6h45 » (jour court FR en majuscules + heure locale). */
 const fmtDateHeure = (s?: string): string => {
   if (!s) return "—";
@@ -381,6 +404,7 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
     });
   }, [docs, query, dateFilter]);
 
+  const dayGroups = useMemo(() => groupByDay(filtered), [filtered]);
   const updateNumAtCard = (docEntry: number, numAtCard: string) =>
     setDocs((cur) => cur.map((d) => (d.docEntry === docEntry ? { ...d, numAtCard } : d)));
   const hasFilters = query.trim() !== "" || dateFilter !== "";
@@ -467,12 +491,15 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
         {/* Mobile : liste de cartes — le tap OUVRE le détail en plein écran
             (pas d'accordéon : le détail ne tient pas en ligne sur téléphone). */}
         {filtered.length > 0 && (
-          <div className="md:hidden space-y-2.5">
-            {filtered.map((d) => {
-              const openIncidents = (byDoc.get(d.docEntry) ?? []).filter((i) => !i.resolved);
-              const heure = heureFromDocRef(d.comments);
-              const creator = creatorFromDocRef(d.comments);
-              return (
+          <div className="md:hidden space-y-4">
+            {dayGroups.map((g) => (
+              <div key={g.key} className="space-y-2">
+                <DayHeader label={g.label} count={g.rows.length} />
+                {g.rows.map((d) => {
+                  const openIncidents = (byDoc.get(d.docEntry) ?? []).filter((i) => !i.resolved);
+                  const heure = heureFromDocRef(d.comments);
+                  const creator = creatorFromDocRef(d.comments);
+                  return (
                 <button
                   key={d.docEntry}
                   type="button"
@@ -480,14 +507,15 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                   className={`w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40 ${isVoided(d) ? "opacity-60" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
-                    {/* Mobile : l'IMPORTANT seulement — fournisseur, date, montant,
-                        statuts. (n° EM, lot, nb lignes → visibles dans le détail.) */}
-                    <div className={`text-[16px] font-semibold truncate ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>
-                      {d.cardName || d.cardCode}
+                    <div className={`text-[15px] font-semibold truncate ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>
+                      <span className="font-mono text-muted-foreground text-[13px]">EM {d.docNum}</span> · {d.cardName || d.cardCode}
                     </div>
-                    <div className={`text-[13px] mt-0.5 tnum ${isVoided(d) ? "text-muted-foreground" : "text-foreground"}`}>
-                      {fmtJourDate(d.docDate)}{heure ? `  ${heure}` : ""}{creator ? ` par ${creator}` : ""}
-                    </div>
+                    {/* Le jour est dans le bandeau → ligne = heure/auteur seulement. */}
+                    {(heure || creator) && (
+                      <div className={`text-[12.5px] mt-0.5 tnum ${isVoided(d) ? "text-muted-foreground" : "text-muted-foreground"}`}>
+                        {[heure, creator].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
                     <span className="inline-flex items-center gap-1.5 flex-wrap mt-1">
                       <CancelBadge d={d} />
                       {!isVoided(d) && <AgreageBadge a={agreages[d.docEntry]} />}
@@ -501,7 +529,6 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                         <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
                       </div>
                     )}
-                    {/* Logo(s) du type d'incident à droite (pas de compteur) */}
                     {openIncidents.length > 0 && (
                       <span className="inline-flex items-center gap-1">
                         {openIncidents.map((i) => <IncidentTypeIcon key={i.id} type={i.type} className="h-[18px] w-[18px]" />)}
@@ -510,8 +537,10 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                     <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
                   </div>
                 </button>
-              );
-            })}
+                  );
+                })}
+              </div>
+            ))}
           </div>
         )}
 
@@ -532,7 +561,14 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
               </thead>
               <tbody>
                 {/* Clic sur la ligne → détail PLEIN ÉCRAN (plus d'accordéon inline). */}
-                {filtered.map((d) => (
+                {dayGroups.map((g) => (
+                  <Fragment key={g.key}>
+                    <tr className="bg-secondary/60">
+                      <td colSpan={restricted ? 7 : 8} className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-foreground tnum border-t border-border">
+                        {g.label} <span className="text-muted-foreground font-semibold">· {g.rows.length}</span>
+                      </td>
+                    </tr>
+                    {g.rows.map((d) => (
                   <tr
                     key={d.docEntry}
                     className={`border-t border-border cursor-pointer transition-colors hover:bg-secondary/30 ${isVoided(d) ? "opacity-60" : ""}`}
@@ -586,6 +622,8 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                       <ChevronRight className="h-4 w-4 inline" />
                     </td>
                   </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

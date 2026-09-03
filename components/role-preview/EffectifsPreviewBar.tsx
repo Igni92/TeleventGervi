@@ -46,7 +46,7 @@ export function EffectifsPreviewBar() {
             aria-pressed={previewRole === role}
             className={`h-8 px-3 rounded-lg border text-[12.5px] font-semibold transition-colors ${
               previewRole === role
-                ? "bg-amber-500 text-white border-amber-500"
+                ? "bg-amber-500 text-black border-amber-500"
                 : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60"
             }`}
           >

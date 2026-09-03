@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Loader2, RefreshCw, PackageCheck, Search, ChevronRight, X, AlertTriangle,
@@ -20,6 +20,31 @@ import { PurchaseOrderEditor } from "./PurchaseOrderEditor";
 
 /** Date « jour + date » unifiée des états SAP : « VEN 10.07.26 ». */
 const fmtDate = fmtJourDate;
+
+/** Regroupe des documents par JOUR de commande (docDate), en conservant l'ordre
+ *  d'entrée (récent → ancien). Rend « JEU 03.09 › CF… » au lieu de répéter la date
+ *  sur chaque ligne. */
+function groupByDay<T extends { docDate?: string | null }>(rows: T[]): { key: string; label: string; rows: T[] }[] {
+  const m = new Map<string, { key: string; label: string; rows: T[] }>();
+  for (const d of rows) {
+    const key = d.docDate?.slice(0, 10) || "—";
+    let g = m.get(key);
+    if (!g) { g = { key, label: key === "—" ? "Sans date" : fmtDate(d.docDate ?? null), rows: [] }; m.set(key, g); }
+    g.rows.push(d);
+  }
+  return [...m.values()];
+}
+
+/** Bandeau de jour — en-tête d'un groupe (« JEU 03.09.26 · 4 »). */
+function DayHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center gap-2 px-1">
+      <span className="text-[12px] font-bold uppercase tracking-wide text-foreground tnum">{label}</span>
+      <span className="text-[11px] font-semibold text-muted-foreground tnum">· {count}</span>
+      <span className="h-px flex-1 bg-border/70" />
+    </div>
+  );
+}
 
 function StatusBadge({ open, cancelled, large }: { open: boolean; cancelled?: boolean; large?: boolean }) {
   const tone = cancelled
@@ -133,6 +158,7 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
     });
   }, [docs, query, dateFilter]);
 
+  const dayGroups = useMemo(() => groupByDay(filtered), [filtered]);
   const hasFilters = query.trim() !== "" || dateFilter !== "";
   const largeDoc = largeEntry != null ? docs.find((d) => d.docEntry === largeEntry) ?? null : null;
   const dueCount = useMemo(() => docs.filter(isDue).length, [docs]);
@@ -205,45 +231,49 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
           </div>
         )}
 
-        {/* Mobile : cartes — tap ouvre le détail plein écran */}
+        {/* Mobile : cartes GROUPÉES PAR JOUR (bandeau JEU 03.09 › cartes) */}
         {filtered.length > 0 && (
-          <div className="md:hidden space-y-2.5">
-            {filtered.map((d) => {
-              const heure = heureFromDocRef(d.comments);
-              const creator = creatorFromDocRef(d.comments);
-              return (
-              <button
-                key={d.docEntry}
-                type="button"
-                onClick={() => setLargeEntry(d.docEntry)}
-                className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
-              >
-                <div className="min-w-0 flex-1">
-                  {/* Mobile : l'IMPORTANT seulement — fournisseur, statut, livraison,
-                      montant. (n° CF, heure de prise, nb lignes → dans le détail.) */}
-                  <div className="text-[16px] font-semibold text-foreground truncate">
-                    {d.cardName || d.cardCode}
-                  </div>
-                  <div className="text-[13px] text-foreground mt-0.5 tnum">
-                    {fmtDate(d.dueDate)}{heure ? `  ${heure}` : ""}{creator ? ` par ${creator}` : ""}
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    {isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}
-                    <EmLinks ems={d.ems} onOpen={openEm} />
-                  </div>
-                </div>
-                <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
-                  {!restricted && (
-                    <div>
-                      <span className="font-display text-[16px] tnum text-muted-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
-                      <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
+          <div className="md:hidden space-y-4">
+            {dayGroups.map((g) => (
+              <div key={g.key} className="space-y-2">
+                <DayHeader label={g.label} count={g.rows.length} />
+                {g.rows.map((d) => {
+                  const heure = heureFromDocRef(d.comments);
+                  const creator = creatorFromDocRef(d.comments);
+                  return (
+                  <button
+                    key={d.docEntry}
+                    type="button"
+                    onClick={() => setLargeEntry(d.docEntry)}
+                    className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[15px] font-semibold text-foreground truncate">
+                        <span className="font-mono text-muted-foreground text-[13px]">CF {d.docNum}</span> · {d.cardName || d.cardCode}
+                      </div>
+                      {/* Le jour est dans le bandeau → ligne = livraison + heure/auteur. */}
+                      <div className="text-[12.5px] text-muted-foreground mt-0.5 tnum">
+                        Livr. {fmtDate(d.dueDate)}{heure ? ` · ${heure}` : ""}{creator ? ` · ${creator}` : ""}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        {isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}
+                        <EmLinks ems={d.ems} onOpen={openEm} />
+                      </div>
                     </div>
-                  )}
-                  <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
-                </div>
-              </button>
-              );
-            })}
+                    <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
+                      {!restricted && (
+                        <div>
+                          <span className="font-display text-[16px] tnum text-muted-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
+                          <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
+                        </div>
+                      )}
+                      <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
+                    </div>
+                  </button>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         )}
 
@@ -263,7 +293,15 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((d) => (
+                {dayGroups.map((g) => (
+                  <Fragment key={g.key}>
+                    {/* Bandeau de jour — case pleine largeur (JEU 03.09.26 · 4). */}
+                    <tr className="bg-secondary/60">
+                      <td colSpan={restricted ? 6 : 7} className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-foreground tnum border-t border-border">
+                        {g.label} <span className="text-muted-foreground font-semibold">· {g.rows.length}</span>
+                      </td>
+                    </tr>
+                    {g.rows.map((d) => (
                   <tr
                     key={d.docEntry}
                     onClick={() => setLargeEntry(d.docEntry)}
@@ -291,6 +329,8 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
                     {!restricted && <td className="px-3 py-2.5 text-right tnum font-display font-bold text-[15px]">{eur(d.totalHT ?? 0)}</td>}
                     <td className="px-2 py-2.5 text-right"><ChevronRight className="h-4 w-4 text-muted-foreground/50 inline" /></td>
                   </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

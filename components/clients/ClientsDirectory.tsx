@@ -84,20 +84,26 @@ const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/\p{Diacrit
 const typeVariant = (t: string | null) =>
   t === "GMS" ? "gms" : t === "EXPORT" ? "export" : t === "CHR" ? "chr" : "outline";
 
-/** Pastilles des jours d'appel — jour actif en accent, jour courant cerclé. */
+/** Pastilles des jours d'appel — jour actif en accent (encre noire), jour courant
+ *  souligné d'un point. Boîtes assez larges pour 2 lettres + vrai espacement
+ *  (avant : w-17px collées → « LuMaMeJeVeSa » en un bloc illisible). */
 function JoursBadges({ joursAppel, today }: { joursAppel: string | null; today: number }) {
   const days = joursAppel ? joursAppel.split(",").map(Number) : [];
   return (
-    <div className="inline-flex gap-[2px]">
+    <div className="inline-flex items-center gap-1">
       {JOUR_NUM.map((d, i) => {
         const on = days.includes(d);
         const isToday = d === today;
         return (
-          <span key={d} className={cn(
-            "inline-flex h-4 w-[17px] items-center justify-center rounded text-caption2 font-semibold",
-            on ? "bg-brand-600 text-white" : "bg-secondary text-muted-foreground/50",
-            isToday && "ring-1 ring-offset-1 ring-brand-500 dark:ring-offset-card",
-          )}>{JOURS[i]}</span>
+          <span key={d} className="relative inline-flex flex-col items-center">
+            <span className={cn(
+              "inline-flex h-[19px] min-w-[21px] px-[3px] items-center justify-center rounded-md text-[10px] font-semibold leading-none tracking-tight",
+              on ? "bg-brand-500 text-black" : "bg-secondary/60 text-muted-foreground/40",
+              isToday && "ring-1 ring-inset ring-foreground/40",
+            )}>{JOURS[i]}</span>
+            {/* Point discret sous le jour courant — repère sans fusionner avec les voisins. */}
+            <span className={cn("mt-0.5 h-[3px] w-[3px] rounded-full", isToday ? "bg-brand-500" : "bg-transparent")} />
+          </span>
         );
       })}
     </div>
@@ -626,7 +632,7 @@ function ClientList({
           />
         )}
         <span className="min-w-0 flex-1">Client</span>
-        <span className="hidden w-[128px] shrink-0 text-left sm:block">Jours d&apos;appel</span>
+        <span className="hidden w-[172px] shrink-0 text-left sm:block">Jours d&apos;appel</span>
         <span className="w-16 shrink-0 text-right">Dern. cde</span>
         {canManage && !selectMode && <span className="w-8 shrink-0" aria-hidden />}
       </div>
@@ -687,7 +693,7 @@ function ClientRow({
   // Bloc droit d'info (lecture seule) : jours d'appel · dernière commande · incidents.
   const info = (
     <>
-      <span className="hidden w-[128px] shrink-0 sm:block"><JoursBadges joursAppel={c.joursAppel} today={today} /></span>
+      <span className="hidden w-[172px] shrink-0 sm:block"><JoursBadges joursAppel={c.joursAppel} today={today} /></span>
       <span className="flex w-16 shrink-0 items-center justify-end gap-1">
         <LastOrder days={c.lastOrderDays} />
       </span>

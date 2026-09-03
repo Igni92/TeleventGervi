@@ -46,7 +46,7 @@ function ModeToggle({ value, onChange, ariaLabel }: {
                 ? m.id === "block"
                   ? "bg-rose-600 text-white shadow-[0_0_10px_rgba(225,29,72,0.35)]"
                   : m.id === "warn"
-                    ? "bg-amber-500 text-white shadow-[0_0_10px_rgba(245,158,11,0.35)]"
+                    ? "bg-amber-500 text-black shadow-[0_0_10px_rgba(245,158,11,0.35)]"
                     : "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}>

@@ -201,7 +201,7 @@ export function DocumentActions({
                   type="button"
                   onClick={send}
                   disabled={sending || !subject.trim() || !body.trim()}
-                  className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-brand-600 text-white text-[13px] font-semibold hover:bg-brand-700 disabled:opacity-60"
+                  className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-brand-600 text-black text-[13px] font-semibold hover:bg-brand-700 disabled:opacity-60"
                 >
                   {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Envoyer
                 </button>

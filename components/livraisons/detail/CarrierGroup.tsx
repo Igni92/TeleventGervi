@@ -480,7 +480,7 @@ function BonTransportActions({
             : "Disponible quand toutes les commandes du transporteur sont faites"}
           className={`inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-9 px-2.5 sm:px-3 rounded-lg text-caption font-semibold transition-[background-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)] active:scale-[0.97] ${
             allFait
-              ? "bg-brand-600 text-white hover:bg-brand-500"
+              ? "bg-brand-600 text-black hover:bg-brand-500"
               : "bg-secondary text-muted-foreground cursor-not-allowed opacity-70"
           }`}
         >

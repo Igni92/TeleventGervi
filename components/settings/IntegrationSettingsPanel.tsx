@@ -179,7 +179,7 @@ export function IntegrationSettingsPanel() {
           type="button"
           onClick={save}
           disabled={saving}
-          className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-brand-600 text-white text-[13px] font-semibold hover:bg-brand-700 disabled:opacity-60"
+          className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-brand-600 text-black text-[13px] font-semibold hover:bg-brand-700 disabled:opacity-60"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Enregistrer
         </button>

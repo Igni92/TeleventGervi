@@ -26,7 +26,7 @@ export function PdfPreviewDialog({
             <span className="truncate">{fileName ?? "Aperçu du document"}</span>
             <span className="ml-auto flex items-center gap-2 shrink-0">
               {onSend && (
-                <button type="button" onClick={onSend} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg bg-brand-600 text-white text-[12px] font-semibold hover:bg-brand-700 transition-colors">
+                <button type="button" onClick={onSend} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg bg-brand-600 text-black text-[12px] font-semibold hover:bg-brand-700 transition-colors">
                   <Send className="h-3.5 w-3.5" /> Envoyer
                 </button>
               )}

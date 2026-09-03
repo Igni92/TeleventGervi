@@ -763,7 +763,7 @@ export const OrderRow = memo(function OrderRow({
             onClick={releaseToPrep}
             disabled={savingRelease}
             title="Mettre ce magasin en préparation — il devient visible pour l'entrepôt (À préparer)"
-            className="inline-flex shrink-0 flex-1 sm:flex-none items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-body font-semibold whitespace-nowrap transition-[background-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)] disabled:opacity-60 active:scale-[0.97] bg-warning text-white hover:bg-[color-mix(in_srgb,hsl(var(--warning))_92%,black)]"
+            className="inline-flex shrink-0 flex-1 sm:flex-none items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-body font-semibold whitespace-nowrap transition-[background-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)] disabled:opacity-60 active:scale-[0.97] bg-warning text-black hover:bg-[color-mix(in_srgb,hsl(var(--warning))_92%,black)]"
           >
             {savingRelease ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             {/* Libellé complet partout : sur mobile le bouton occupe sa propre
@@ -1306,7 +1306,7 @@ export const OrderRow = memo(function OrderRow({
                     aria-pressed={picked}
                     className={`flex w-full items-center gap-3 px-3 py-3 text-left transition-colors ${picked ? "bg-warning/10" : "hover:bg-secondary/40"}`}
                   >
-                    <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${picked ? "bg-warning text-white" : "ring-1 ring-border text-transparent"}`}>
+                    <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${picked ? "bg-warning text-black" : "ring-1 ring-border text-transparent"}`}>
                       <Check className="h-4 w-4" strokeWidth={3} />
                     </span>
                     <span className="inline-flex min-w-[40px] shrink-0 items-center justify-center rounded-md bg-secondary px-1.5 py-0.5 text-body font-bold tnum text-foreground">

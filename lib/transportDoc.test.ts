@@ -42,13 +42,17 @@ const ctx: DocTransportContext = {
 };
 
 describe("docTransportCost", () => {
-  it("magasin IDF (GMS/CHR) = DIRECT au coût position — SAUF réseau Delanchy/Fargier (grille Delanchy)", () => {
-    // Orly (94) en FARGIER → réseau Delanchy : tarifé sur la GRILLE DELANCHY
-    // (la feuille), PAS au coût flotte. 40 kg → forfait 0-100 = 32 €.
-    const t = docTransportCost(ctx, { cardCode: "LORLY", zip: "94 310", kg: 40, trspCode: "FARGIER", segment: "GMS" });
+  it("magasin IDF (GMS/CHR) = DIRECT au coût position — SAUF réseau Delanchy (grille Delanchy)", () => {
+    // Delanchy (FT94) en IDF → tarifé sur la GRILLE DELANCHY, PAS au coût flotte.
+    // 40 kg → forfait 0-100 = 32 €.
+    const t = docTransportCost(ctx, { cardCode: "LORLY", zip: "94 310", kg: 40, trspCode: "FT94", segment: "GMS" });
     expect(t.mode).toBe("grille");
     expect(t.cost).toBeCloseTo(32);
-    // …mais SANS transporteur identifié, la règle IDF « direct » s'applique toujours.
+    // FARGIER n'est PLUS du réseau Delanchy (2026-09) → transporteur indépendant :
+    // la règle IDF « direct » s'applique comme pour tout autre transporteur.
+    const tf = docTransportCost(ctx, { cardCode: "LORLY", zip: "94 310", kg: 40, trspCode: "FARGIER", segment: "GMS" });
+    expect(tf.mode).toBe("direct");
+    // …et SANS transporteur identifié, la règle IDF « direct » s'applique aussi.
     const t2 = docTransportCost(ctx, { cardCode: "XIDF", zip: "77100", kg: 40, segment: "CHR" });
     expect(t2.mode).toBe("direct");
     expect(t2.cost).toBeCloseTo(25.25);

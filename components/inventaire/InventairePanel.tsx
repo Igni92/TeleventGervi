@@ -1231,7 +1231,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                           onClick={() => togglePrepared(o.docEntry)}
                           className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${checked ? "bg-amber-50 dark:bg-amber-500/10" : "hover:bg-muted/40"}`}
                         >
-                          <span className={`grid h-5 w-5 shrink-0 place-items-center rounded border ${checked ? "border-amber-500 bg-amber-500 text-white" : "border-border"}`}>
+                          <span className={`grid h-5 w-5 shrink-0 place-items-center rounded border ${checked ? "border-amber-500 bg-amber-500 text-black" : "border-border"}`}>
                             {checked && <CheckCircle2 className="h-3.5 w-3.5" />}
                           </span>
                           <span className="min-w-0 flex-1">

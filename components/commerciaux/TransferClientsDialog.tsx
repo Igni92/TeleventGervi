@@ -301,7 +301,7 @@ function Column(props: {
     >
       <div className="flex items-center justify-between gap-2 px-3 pt-3">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white text-[10px] font-bold">{props.trig}</span>
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-black text-[10px] font-bold">{props.trig}</span>
           <p className="font-semibold text-[13.5px] text-foreground truncate">{props.title}</p>
           <span className="text-[11.5px] text-muted-foreground tnum">{props.count}</span>
         </div>
@@ -345,7 +345,7 @@ function Column(props: {
                 onClick={() => props.onToggle(c.id)}
                 className={`group flex items-center gap-2 rounded-lg border px-2 py-1.5 cursor-pointer select-none transition-colors ${isSel ? "border-brand-500 bg-brand-500/10" : "border-transparent hover:bg-secondary/60"}`}
               >
-                <span className={`grid h-4 w-4 shrink-0 place-items-center rounded border ${isSel ? "border-brand-600 bg-brand-600 text-white" : "border-border bg-background"}`}>
+                <span className={`grid h-4 w-4 shrink-0 place-items-center rounded border ${isSel ? "border-brand-600 bg-brand-600 text-black" : "border-border bg-background"}`}>
                   {isSel && <CheckSquare className="h-3 w-3" strokeWidth={3} />}
                 </span>
                 {moveDir === "left" && (

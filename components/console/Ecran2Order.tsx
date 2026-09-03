@@ -1517,7 +1517,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
             <button
               type="button" onClick={() => setStockTab("stock")} aria-pressed={stockTab === "stock"}
               className={`inline-flex items-center h-8 px-3 rounded text-[12.5px] font-semibold transition-colors ${
-                stockTab === "stock" ? "bg-brand-600 text-white" : "text-muted-foreground hover:text-foreground"
+                stockTab === "stock" ? "bg-brand-600 text-black" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               Stock

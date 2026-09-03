@@ -22,7 +22,7 @@ export function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (v:
           title={`Vue ${label.toLowerCase()}`}
           aria-pressed={value === m}
           className={`inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-[12.5px] font-medium transition-colors ${
-            value === m ? "bg-brand-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+            value === m ? "bg-brand-500 text-black shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
           }`}
         >
           <Icon className="h-3.5 w-3.5" />

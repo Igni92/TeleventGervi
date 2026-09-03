@@ -383,7 +383,7 @@ export function ProductsTable() {
             onClick={() => setSelectedGroups(new Set())}
             className={`h-7 px-3 rounded-full text-[11.5px] font-medium whitespace-nowrap transition-all shrink-0 ${
               selectedGroups.size === 0
-                ? "bg-brand-600 text-white shadow-[0_1px_3px_rgba(79,70,229,0.3)]"
+                ? "bg-brand-600 text-black shadow-[0_1px_3px_rgba(79,70,229,0.3)]"
                 : "bg-card border border-border text-foreground/70 hover:border-foreground/40"
             }`}
           >
@@ -404,7 +404,7 @@ export function ProductsTable() {
                 })}
                 className={`h-7 px-3 rounded-full text-[11.5px] font-medium whitespace-nowrap transition-all shrink-0 ${
                   checked
-                    ? "bg-brand-600 text-white shadow-[0_1px_3px_rgba(79,70,229,0.3)]"
+                    ? "bg-brand-600 text-black shadow-[0_1px_3px_rgba(79,70,229,0.3)]"
                     : "bg-card border border-border text-foreground/80 hover:border-brand-500/50 hover:text-foreground"
                 }`}
               >
@@ -970,7 +970,7 @@ function StockUnitModal({
                             onClick={() => setUnit(g.id, opt.value)}
                             className={`h-7 px-2.5 rounded-md text-[11.5px] font-semibold transition-colors disabled:opacity-50 ${
                               active
-                                ? "bg-brand-600 text-white shadow-[0_1px_2px_rgba(79,70,229,0.3)]"
+                                ? "bg-brand-600 text-black shadow-[0_1px_2px_rgba(79,70,229,0.3)]"
                                 : "text-foreground/70 hover:text-foreground"
                             }`}
                           >

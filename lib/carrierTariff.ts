@@ -378,14 +378,14 @@ function antoineTemplate(carrierCode: string): CarrierTariff {
   };
 }
 
-/** Code Delanchy ? = contient DELANCHY, un dépôt « FT » suivi d'un numéro de
- *  département (FT54, FT86, FT94…) — Delanchy regroupe TOUS les FT — ou
- *  FARGIER : en Île-de-France, Delanchy ramasse et Fargier livre (même réseau,
- *  même grille, mêmes groupes de préparation). */
+/** Code Delanchy ? = contient DELANCHY ou un dépôt « FT » suivi d'un numéro de
+ *  département (FT54, FT86, FT94…) — Delanchy regroupe TOUS les FT.
+ *  ⚠️ FARGIER n'en fait PLUS partie (2026-09) : il n'est plus ramassé par
+ *  Delanchy → transporteur INDÉPENDANT (groupe + tarif propres). */
 export function isDelanchyCarrierCode(code: string | null | undefined): boolean {
   const c = normCarrier(code);
   if (!c) return false;
-  return c.includes("DELANCHY") || c.includes("FARGIER") || /(^|[^A-Z0-9])FT\s*\d+/.test(c);
+  return c.includes("DELANCHY") || /(^|[^A-Z0-9])FT\s*\d+/.test(c);
 }
 
 /**
