@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
     const created = await prisma.rhLeaveRequest.create({
       data: { employeeId: c.emp.id, type: b.type, statut: "pending", startDate: start, endDate: end, jours, origin: "salarie", note: b.note ? String(b.note) : null },
     });
-    await prisma.rhEvent.create({ data: { employeeId: c.emp.id, type: "absence", date: start, meta: JSON.stringify({ leaveId: created.id, leaveType: b.type, jours }) } });
+    await prisma.rhEvent.create({ data: { employeeId: c.emp.id, type: "absence", date: start, meta: JSON.stringify({ leaveId: created.id, leaveType: b.type, jours, start: start.toISOString(), end: end.toISOString() }) } });
     return NextResponse.json({ ok: true, leave: created });
   }
 

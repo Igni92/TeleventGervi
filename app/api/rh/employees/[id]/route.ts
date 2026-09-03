@@ -72,9 +72,18 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     for (const k of ["firstName", "lastName", "displayName", "poste", "service", "phone", "sapSlpName", "matricule"] as const) {
       if (k in b) data[k] = b[k] ? String(b[k]) : null;
     }
-    if ("hireDate" in b && b.hireDate) { const d = new Date(String(b.hireDate)); if (!Number.isNaN(d.getTime())) data.hireDate = d; }
+    let newHire: Date | null = null;
+    if ("hireDate" in b) {
+      if (b.hireDate) { const d = new Date(String(b.hireDate)); if (!Number.isNaN(d.getTime())) { data.hireDate = d; newHire = d; } }
+      else data.hireDate = null;
+    }
     if ("sapSlpCode" in b) data.sapSlpCode = typeof b.sapSlpCode === "number" ? b.sapSlpCode : null;
     await prisma.employee.update({ where: { id }, data });
+    // La date d'ENTRÉE pilote la date de début du contrat ACTIF (date de signature
+    // affichée dans la liste des contrats) — demande direction.
+    if (newHire) {
+      await prisma.contract.updateMany({ where: { employeeId: id, statut: "actif" }, data: { dateDebut: newHire } });
+    }
     return NextResponse.json({ ok: true });
   }
 

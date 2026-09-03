@@ -27,6 +27,7 @@ const EVENT_META: Record<string, { label: string; icon: React.ReactNode; cls: st
   note: { label: "Note", icon: <StickyNote className="h-4 w-4" />, cls: "text-muted-foreground" },
 };
 const DOC_LABEL: Record<string, string> = { contrat: "Contrat", bulletin: "Bulletin", attestation: "Attestation", justificatif: "Justificatif", autre: "Autre" };
+const CONTRACT_TYPES = ["CDI", "CDD", "SAISONNIER", "APPRENTISSAGE", "INTERIM", "STAGE", "ADMINISTRATEUR"];
 
 function metaText(e: Event): string | null {
   if (!e.meta) return null;
@@ -35,7 +36,11 @@ function metaText(e: Event): string | null {
     if (m.text) return m.text;
     if (m.reason) return `Motif : ${m.reason}`;
     if (m.contractType) return `${m.contractType}`;
-    if (m.leaveType) return `${m.leaveType} · ${m.jours ?? "?"} j`;
+    // Congé : uniquement la PÉRIODE (début → fin), pas de décompte parasite.
+    if (m.leaveType) {
+      if (m.start && m.end) return `du ${fmt(m.start)} au ${fmt(m.end)}`;
+      return String(m.leaveType);
+    }
   } catch { /* ignore */ }
   return null;
 }
@@ -50,6 +55,8 @@ export function EmployeeFiche({ id }: { id: string }) {
   const [hireVal, setHireVal] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploadType, setUploadType] = useState("contrat");
+  const [editCt, setEditCt] = useState<string | null>(null);
+  const editVals = useRef<Record<string, unknown>>({});
 
   const load = useCallback(async () => {
     const [r, rd] = await Promise.all([
@@ -68,6 +75,15 @@ export function EmployeeFiche({ id }: { id: string }) {
     const j = await r.json();
     if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return false; }
     toast.success(ok); load(); return true;
+  };
+
+  const patchContract = async (cid: string) => {
+    const v = editVals.current;
+    if (Object.keys(v).length === 0) { setEditCt(null); return; }
+    const r = await fetch(`/api/rh/contracts/${cid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(v) });
+    const j = await r.json();
+    if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
+    toast.success("Contrat mis à jour"); setEditCt(null); editVals.current = {}; load();
   };
 
   const saveHire = async () => {
@@ -141,16 +157,32 @@ export function EmployeeFiche({ id }: { id: string }) {
         </div>
       </div>
 
-      {/* Contrats */}
+      {/* Contrats — type & heures éditables (direction) */}
       <section>
         <h3 className="text-[13px] font-semibold text-foreground mb-2">Contrats</h3>
         <ul className="space-y-1.5">
           {emp.contracts.map((c) => (
             <li key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-[13px]">
-              <span><b className="text-foreground">{c.type}</b> · {c.heuresHebdo}h/sem{c.saisonLabel ? ` · ${c.saisonLabel}` : ""}</span>
-              <span className="text-muted-foreground tnum">{fmt(c.dateDebut)}{c.dateFin ? ` → ${fmt(c.dateFin)}` : ""}
-                <span className={`ml-2 rounded px-1.5 py-0.5 text-[11px] ${c.statut === "actif" ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300" : "bg-secondary text-muted-foreground"}`}>{c.statut}</span>
-              </span>
+              {editCt === c.id ? (
+                <div className="flex items-center gap-2 flex-wrap flex-1">
+                  <select defaultValue={c.type} onChange={(e) => (editVals.current.type = e.target.value)} className="h-8 rounded-md border border-input bg-background px-2 text-body">
+                    {CONTRACT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <Input type="number" defaultValue={c.heuresHebdo} onChange={(e) => (editVals.current.heuresHebdo = Number(e.target.value))} className="h-8 w-20" title="Heures/sem" />
+                  <Input type="date" defaultValue={dISO(c.dateFin)} onChange={(e) => (editVals.current.dateFin = e.target.value)} className="h-8 w-40" title="Fin (option)" />
+                  <Button size="sm" onClick={() => patchContract(c.id)}><Check className="h-3.5 w-3.5" /></Button>
+                  <button type="button" onClick={() => setEditCt(null)} className="text-[11px] text-muted-foreground hover:text-foreground">Annuler</button>
+                </div>
+              ) : (
+                <>
+                  <span><b className="text-foreground">{c.type}</b> · {c.heuresHebdo}h/sem{c.saisonLabel ? ` · ${c.saisonLabel}` : ""}</span>
+                  <span className="flex items-center gap-2 text-muted-foreground tnum">
+                    {fmt(c.dateDebut)}{c.dateFin ? ` → ${fmt(c.dateFin)}` : ""}
+                    <span className={`rounded px-1.5 py-0.5 text-[11px] ${c.statut === "actif" ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300" : "bg-secondary text-muted-foreground"}`}>{c.statut}</span>
+                    <button type="button" onClick={() => { setEditCt(c.id); editVals.current = {}; }} title="Modifier le contrat" className="text-muted-foreground hover:text-primary"><Pencil className="h-3 w-3" /></button>
+                  </span>
+                </>
+              )}
             </li>
           ))}
           {emp.contracts.length === 0 && <li className="text-[13px] text-muted-foreground">Aucun contrat.</li>}

@@ -431,6 +431,21 @@ export function Sidebar() {
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+
+        {/* Bouton « Se déconnecter » VISIBLE (style Figma) — surface pleine, en bas. */}
+        {session?.user && (
+          <button
+            type="button"
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            title="Se déconnecter"
+            className={`flex items-center rounded-xl bg-secondary/80 hover:bg-secondary text-foreground/80 hover:text-foreground transition-colors ${
+              rail ? "justify-center h-9 w-9 mx-auto" : "gap-2.5 w-full h-10 px-3 text-caption font-medium"
+            }`}
+          >
+            <LogOut className="h-[18px] w-[18px] shrink-0" />
+            {!rail && <span>Se déconnecter</span>}
+          </button>
+        )}
       </div>
     </motion.aside>
   );
