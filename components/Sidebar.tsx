@@ -286,7 +286,7 @@ export function Sidebar() {
                             <motion.span
                               layoutId="sidebar-active"
                               transition={SPRING.snappy}
-                              className="absolute inset-0 rounded-lg bg-card ring-1 ring-border shadow-[0_1px_2px_rgba(0,0,0,0.06)]"
+                              className="absolute inset-0 rounded-lg bg-primary/[0.14] ring-1 ring-primary/25 shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
                             />
                           )}
                           <span className="relative shrink-0">

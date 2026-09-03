@@ -145,7 +145,7 @@ export function EmployeeFiche({ id }: { id: string }) {
 function DepartDialog({ onClose, onConfirm }: { onClose: () => void; onConfirm: (d: string, r: string) => void }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState("");
-  const REASONS = ["Fin de CDD", "Démission", "Licenciement", "Rupture conventionnelle", "Fin de période d'essai", "Retraite", "Autre"];
+  const REASONS = ["Fin de CDD", "Rupture anticipée", "Démission", "Licenciement", "Rupture conventionnelle", "Fin de période d'essai", "Retraite", "Autre"];
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent size="sm">
