@@ -73,6 +73,7 @@ model User {
   accounts      Account[]
   sessions      Session[]
   presences     Presence[]
+  employee      Employee?
 }
 
 // Présence quotidienne d'un commercial — pilote la distribution des clients.
@@ -1405,4 +1406,318 @@ model UsageEvent {
   @@index([userEmail])
   @@index([sessionId])
   @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODULE RH (SIRH) — refonte complète, base relationnelle (fin du tout-AppSetting).
+// Convention IDCC 1405 (expédition/exportation fruits & légumes). Règles chiffrées
+// paramétrables et versionnées dans RhReglement. Statuts/enum = String (comme le
+// reste du schéma) ; sous-listes stables = JSON String (comme AppSetting) pour une
+// migration KV→SQL simple. Voir /home/ubuntu/.claude/plans/rh-refonte.md + mémoire
+// televent-rh-refonte. Tables préfixées Rh* (sauf Employee/Contract, entités socle).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Salarié Gervifrais — entité RH centrale. Liée au compte d'auth (User) et,
+// pour un commercial, à son compte SAP (slpCode/slpName) — lien ÉDITABLE dans la
+// fiche salarié (rattache CA + commissions). email = clé de reprise des données KV
+// historiques (rhprofil:<email>, etc.).
+model Employee {
+  id           String    @id @default(cuid())
+  userId       String?   @unique // compte d'authentification (null = pas encore de login)
+  email        String    @unique // clé de migration depuis AppSetting (rh*:<email>)
+  firstName    String?
+  lastName     String?
+  displayName  String?
+  initials     String?
+  matricule    String?   @unique
+  phone        String?
+  poste        String? // intitulé de poste
+  service      String? // équipe / service (entrepôt, commerce, prépa…)
+  // Lien SAP : code commercial (SalesPerson) — rattache l'activité CA/commissions.
+  // Éditable dans la fiche salarié. Null = salarié non-commercial.
+  sapSlpCode   Int?
+  sapSlpName   String?
+  birthDate    DateTime?
+  hireDate     DateTime? // date d'entrée (ancienneté, prorata 13e)
+  exitDate     DateTime?
+  exitReason   String? // démission / licenciement / fin CDD / retraite / rupture…
+  statutEmploi String    @default("actif") // actif | suspendu | sorti
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user        User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  contracts   Contract[]
+  timeClocks  RhTimeClock[]
+  weekSheets  RhWeekSheet[]
+  leaves      RhLeaveRequest[]
+  balances    RhLeaveBalance[]
+  annuals     RhAnnualCounter[]
+  payElements RhPayrollElement[]
+  documents   RhDocument[]
+  events      RhEvent[]
+
+  @@index([statutEmploi])
+  @@index([sapSlpName])
+  @@index([hireDate])
+}
+
+// Contrat de travail — un salarié peut en avoir plusieurs (renouvellement,
+// saison N+1). Le contrat ACTIF porte les heures de référence du moteur.
+model Contract {
+  id              String    @id @default(cuid())
+  employeeId      String
+  type            String // CDI | CDD | SAISONNIER | APPRENTISSAGE | INTERIM | STAGE
+  statut          String    @default("actif") // brouillon | actif | termine
+  dateDebut       DateTime
+  dateFin         DateTime? // CDD/saisonnier
+  essaiFin        DateTime? // fin de période d'essai (alerte)
+  heuresHebdo     Float     @default(35) // base légale majorations (35/39/42…)
+  heuresAnnuelles Float     @default(1600) // annualisation IDCC 1405
+  tempsPartiel    Boolean   @default(false)
+  classification  String? // niveau/coefficient IDCC 1405
+  tauxHoraire     Float?
+  saisonLabel     String? // ex. « Saison fraises 2026 »
+  reconductible   Boolean   @default(false)
+  motif           String? // motif de recours (CDD/saisonnier)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([statut])
+  @@index([type])
+  @@index([dateFin])
+  @@index([essaiFin])
+}
+
+// Journée de POINTAGE (badgeuse). Une par salarié et par jour. Les pointages
+// (arrivée/départ, géolocalisés) sont dans RhTimePunch. heuresBrutes = calcul.
+model RhTimeClock {
+  id          String    @id @default(cuid())
+  employeeId  String
+  date        DateTime // jour (00:00)
+  pauseMin    Int       @default(0)
+  heuresMin   Int       @default(0) // minutes travaillées calculées (net de pause)
+  statut      String    @default("ouvert") // ouvert | clos
+  source      String    @default("badge") // badge | manuel | import
+  note        String?
+  validatedBy String?
+  validatedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  employee Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  punches  RhTimePunch[]
+
+  @@unique([employeeId, date])
+  @@index([date])
+}
+
+// Pointage unitaire — arrivée ou départ, horodaté et géolocalisé (badgeuse mobile).
+model RhTimePunch {
+  id          String   @id @default(cuid())
+  timeClockId String
+  kind        String // in | out
+  at          DateTime // horodatage
+  lat         Float?
+  lng         Float?
+  accuracyM   Float? // précision GPS (m)
+  source      String   @default("badge") // badge | manuel | correction
+  editedBy    String? // si correction a posteriori (tracé)
+  createdAt   DateTime @default(now())
+
+  timeClock RhTimeClock @relation(fields: [timeClockId], references: [id], onDelete: Cascade)
+
+  @@index([timeClockId])
+  @@index([at])
+}
+
+// Feuille de semaine (ISO) — dérivée des pointages ou saisie. `days` = JSON des 7
+// jours (m1/m2/a1/a2/tag/note) ; `calc` = JSON du calcul (sup25/sup50/structurel/
+// récup/majEquiv). Remplace rhsem:<email>:<week> ; validation remplace rhvalid:.
+model RhWeekSheet {
+  id               String   @id @default(cuid())
+  employeeId       String
+  isoWeek          String // "YYYY-Www"
+  monthAttrib      String? // "YYYY-MM" d'attribution paie (dernier jour travaillé)
+  contractHours    Float    @default(35) // snapshot des heures contrat de la semaine
+  option           String? // recup | paiement | mixte (décision employeur)
+  paySuppMin       Int      @default(0) // part heures supp payée (min majorées)
+  days             String   @default("[]") // JSON DayHours[7]
+  calc             String? // JSON WeekCalc (résultat moteur)
+  validationStatus String   @default("draft") // draft | sent | counter | agreed
+  validationData   String? // JSON HoursValidation (proposition/historique)
+  updatedBy        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, isoWeek])
+  @@index([monthAttrib])
+}
+
+// Compteur d'annualisation IDCC 1405 — 1600 h/an, modulation 12 mois. Un par
+// salarié et par période de modulation.
+model RhAnnualCounter {
+  id              String   @id @default(cuid())
+  employeeId      String
+  periodStart     DateTime // début période 12 mois
+  periodEnd       DateTime
+  heuresTheo      Float    @default(1600) // dû théorique (prorata entrée/sortie)
+  heuresRealisees Float    @default(0)
+  soldeModulMin   Int      @default(0) // solde de modulation (haute/basse), minutes
+  heuresSuppAnnee Float    @default(0) // heures supp hors modulation
+  contingentUsed  Float    @default(0) // heures supp imputées au contingent (200)
+  regulDue        Float    @default(0) // régularisation due (fin période/départ)
+  updatedAt       DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, periodStart])
+  @@index([periodEnd])
+}
+
+// Demande de congé / absence. Remplace rhconge:<email>:<id>. Décisions/historique
+// en JSON. Justificatif → RhDocument (justificatifId).
+model RhLeaveRequest {
+  id             String    @id @default(cuid())
+  employeeId     String
+  type           String // cp | rtt | recup | sans_solde | maladie | absence | autre
+  statut         String    @default("pending") // pending | approved | refused | cancelled
+  startDate      DateTime
+  endDate        DateTime
+  jours          Float     @default(0) // jours décomptés (ouvrables)
+  demiJournee    String? // null | am | pm (demi-journée)
+  origin         String    @default("salarie") // salarie | direction
+  note           String?
+  decisionNote   String?
+  decidedBy      String?
+  decidedAt      DateTime?
+  justificatifId String? // → RhDocument
+  justified      Boolean   @default(false)
+  history        String    @default("[]") // JSON des évènements (proposition boomerang…)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([statut])
+  @@index([startDate])
+}
+
+// Soldes consolidés (recalculables) — CP + récup + ancienneté, par période de réf.
+model RhLeaveBalance {
+  id              String   @id @default(cuid())
+  employeeId      String
+  periodeRef      String // ex. "2025-2026" (1er juin → 31 mai) ou "permanent"
+  cpAcquis        Float    @default(0)
+  cpPris          Float    @default(0)
+  cpSolde         Float    @default(0)
+  recupSoldeMin   Int      @default(0)
+  recupCapMin     Int      @default(0)
+  ancienneteJours Float    @default(0) // congés d'ancienneté acquis (art. 36)
+  updatedAt       DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, periodeRef])
+}
+
+// Jours fériés — source unique (remplace le calcul dispersé). region pour l'Alsace-Moselle.
+model RhHoliday {
+  date   DateTime @id
+  label  String
+  region String? // null = national
+  worked Boolean  @default(false) // habituellement chômé
+}
+
+// Élément de paie mensuel — prime / frais / 13e / avantage véhicule / récup payée /
+// commission. Remplace salmois:<email>:<month> (éclaté en lignes) + salrecuppay:.
+model RhPayrollElement {
+  id         String   @id @default(cuid())
+  employeeId String
+  mois       String // "YYYY-MM"
+  type       String // prime | frais | treizieme | vehicule_an | recup_paye | commission | autre
+  label      String?
+  montant    Float    @default(0)
+  meta       String? // JSON (détails : barème AN, dates récup, bulletin…)
+  statut     String   @default("saisi") // saisi | envoye
+  createdBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, mois])
+  @@index([mois])
+}
+
+// Envoi du document compta (remplace salenvoi:<id> + salrecap:).
+model RhPayrollSend {
+  id       String   @id @default(cuid())
+  mois     String // "YYYY-MM"
+  kind     String   @default("normal") // normal | rectif
+  filename String?
+  to       String   @default("[]") // JSON string[] destinataires
+  sentBy   String?
+  sentAt   DateTime @default(now())
+
+  @@index([mois])
+}
+
+// Coffre-fort documentaire — contrat / bulletin / attestation / justificatif.
+// contenu = base64 data-URL (comme congejustif:) ou pointeur externe.
+model RhDocument {
+  id             String   @id @default(cuid())
+  employeeId     String?
+  type           String // contrat | bulletin | attestation | justificatif | autre
+  nom            String
+  mime           String?
+  contenu        String // base64 data-URL
+  visibleSalarie Boolean  @default(true)
+  uploadedBy     String?
+  createdAt      DateTime @default(now())
+
+  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([type])
+}
+
+// Évènements RH — socle du turnover/analytics + audit. embauche/départ/avenant/
+// absence/incident…
+model RhEvent {
+  id         String   @id @default(cuid())
+  employeeId String?
+  type       String // embauche | depart | contrat | absence | retour | note
+  date       DateTime
+  meta       String? // JSON
+  createdBy  String?
+  createdAt  DateTime @default(now())
+
+  employee Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId])
+  @@index([type])
+  @@index([date])
+}
+
+// Paramètres conventionnels versionnés (IDCC 1405 par défaut). params = JSON
+// (contingent, majorations, bornes modulation, tranches ancienneté, plafond récup,
+// période d'essai, préavis…). La version d'effet la plus récente ≤ date fait foi.
+model RhReglement {
+  id        String   @id @default(cuid())
+  version   String   @unique // ex. "IDCC1405-2025"
+  dateEffet DateTime
+  label     String?
+  params    String   @default("{}") // JSON
+  active    Boolean  @default(true)
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dateEffet])
 }
