@@ -4,9 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Loader2, ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
 import { fmtHM } from "@/lib/rh/time";
 
-type Day = { min: number; tag: string | null };
+type Day = { plannedMin: number; actualMin: number; min: number; tag: string | null };
 type Row = { employeeId: string; name: string; poste: string | null; days: Day[] };
-type Week = { isoWeek: string; days: string[]; holidays: string[]; rows: Row[] };
+type Week = { isoWeek: string; days: string[]; holidays: string[]; badgeuse: boolean; rows: Row[] };
 
 const DOW = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const CELL: Record<string, { cls: string; label: string }> = {
@@ -50,6 +50,11 @@ export function PlanningTeamPanel({ initialWeek }: { initialWeek: string }) {
 
   return (
     <div className="space-y-4">
+      {data && !data.badgeuse && (
+        <div className="rounded-xl border border-sky-500/40 bg-sky-500/[0.06] px-4 py-2.5 text-[13px] text-foreground">
+          <b>Badgeuse désactivée</b> — <span className="text-muted-foreground">présence = horaires prévus au contrat. « Pointé » reflète l&apos;horaire prévu (les absences approuvées restent déduites).</span>
+        </div>
+      )}
       <div className="flex items-center gap-1.5">
         <button type="button" onClick={() => shift(-1)} className="h-9 w-9 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary"><ChevronLeft className="h-4 w-4" /></button>
         <span className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 h-9 text-[13px] font-semibold text-foreground"><CalendarRange className="h-4 w-4 text-muted-foreground" /> {iso} · {range}</span>
@@ -79,11 +84,13 @@ export function PlanningTeamPanel({ initialWeek }: { initialWeek: string }) {
                   <td className="px-3 py-1.5 sticky left-0 bg-card"><span className="font-medium text-foreground whitespace-nowrap">{r.name}</span></td>
                   {r.days.map((d, i) => {
                     const c = CELL[d.tag ?? "absent"] ?? CELL.absent;
+                    const showPlanned = d.tag === "present" && d.plannedMin > 0 && d.plannedMin !== d.actualMin;
                     return (
-                      <td key={i} className="px-1.5 py-1.5 text-center">
-                        <span className={`inline-block min-w-[52px] rounded-md px-2 py-1 text-[11.5px] font-medium ${c.cls}`} title={c.label}>
-                          {d.tag === "present" ? fmtHM(d.min) : c.label === "—" ? "—" : c.label}
+                      <td key={i} className="px-1.5 py-1.5 text-center align-top">
+                        <span className={`inline-block min-w-[52px] rounded-md px-2 py-1 text-[11.5px] font-medium ${c.cls}`} title={showPlanned ? `Prévu ${fmtHM(d.plannedMin)} · pointé ${fmtHM(d.actualMin)}` : c.label}>
+                          {d.tag === "present" ? fmtHM(d.actualMin || d.min) : c.label === "—" ? "—" : c.label}
                         </span>
+                        {showPlanned && <span className="block text-[9px] text-muted-foreground mt-0.5">prévu {fmtHM(d.plannedMin)}</span>}
                       </td>
                     );
                   })}

@@ -58,6 +58,12 @@ export interface RhReglementParams {
   /** Congés d'ancienneté : jours supplémentaires par seuil d'années. À CONFIRMER. */
   cpAncienneteTranches: { ansMin: number; joursSupp: number }[];
 
+  // ── Pauses (Code du travail L3121-16 ; convention peut prévoir plus) ──
+  /** Seuil de temps de travail quotidien (minutes) déclenchant la pause obligatoire. */
+  pauseSeuilMinutes: number; // 360 = 6 h
+  /** Durée minimale de pause obligatoire (minutes) au-delà du seuil. */
+  pauseMinObligatoire: number; // 20
+
   // ── Récupération / repos compensateur ──
   /** Plafond par défaut du compteur de récup (heures) — repli si non fixé par salarié. */
   recupCapDefautH: number;
@@ -104,6 +110,9 @@ export const REGLEMENT_1405: RhReglementParams = {
     { ansMin: 15, joursSupp: 2 },
     { ansMin: 20, joursSupp: 3 },
   ],
+
+  pauseSeuilMinutes: 360, // 6 h (Code du travail L3121-16)
+  pauseMinObligatoire: 20,
 
   recupCapDefautH: 35,
   recupDemiJournee: true,

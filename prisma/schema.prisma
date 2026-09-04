@@ -1484,6 +1484,9 @@ model Contract {
   saisonLabel     String? // ex. « Saison fraises 2026 »
   reconductible   Boolean   @default(false)
   motif           String? // motif de recours (CDD/saisonnier)
+  // Horaires PRÉVUS + modulation saisonnière (JSON WeekSchedule, cf. lib/rh/schedule).
+  // null → horaire par défaut dérivé de heuresHebdo. Colonne additive (raw SQL).
+  horairesJson    String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

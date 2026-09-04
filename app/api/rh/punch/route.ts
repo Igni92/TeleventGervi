@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { isRhV2Enabled } from "@/lib/rh/flag";
 import { getOrCreateEmployeeByEmail, addPunch, getTodayClock } from "@/lib/rh/db";
+import { isBadgeuseEnabled } from "@/lib/rh/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,9 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   const email = session?.user?.email;
   if (!email) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await isBadgeuseEnabled())) {
+    return NextResponse.json({ error: "Badgeuse désactivée — présence gérée selon les horaires du contrat." }, { status: 409 });
+  }
 
   let b: { kind?: string; lat?: number; lng?: number; accuracyM?: number };
   try { b = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }

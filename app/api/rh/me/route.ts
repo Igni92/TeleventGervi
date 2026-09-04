@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { isRhV2Enabled } from "@/lib/rh/flag";
 import { getOrCreateEmployeeByEmail, getTodayClock } from "@/lib/rh/db";
+import { isBadgeuseEnabled } from "@/lib/rh/settings";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,8 @@ export async function GET() {
   if (!email) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
   const emp = await getOrCreateEmployeeByEmail(email, session.user?.name);
-  const [today, contract, balance, documents] = await Promise.all([
+  const [badgeuse, today, contract, balance, documents] = await Promise.all([
+    isBadgeuseEnabled(),
     getTodayClock(emp.id),
     prisma.contract.findFirst({ where: { employeeId: emp.id, statut: "actif" }, orderBy: { dateDebut: "desc" } }),
     prisma.rhLeaveBalance.findFirst({ where: { employeeId: emp.id }, orderBy: { updatedAt: "desc" } }),
@@ -26,6 +28,7 @@ export async function GET() {
 
   return NextResponse.json({
     ok: true,
+    badgeuseEnabled: badgeuse,
     employee: { id: emp.id, email: emp.email, name: session.user?.name ?? null },
     today: {
       inside: today.inside,

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { isRhV2Enabled } from "@/lib/rh/flag";
+import { isBadgeuseEnabled } from "@/lib/rh/settings";
+import { parseSchedule, plannedNetForDate } from "@/lib/rh/schedule";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -29,15 +31,41 @@ export async function GET(req: NextRequest) {
   const mois = monthOk(raw) ? raw : new Date().toISOString().slice(0, 7);
   const { start, end } = monthRange(mois);
 
-  const [employees, clocks, elements, sends] = await Promise.all([
+  const [badgeuse, employees, clocks, elements, sends, contracts, holidays, leaves] = await Promise.all([
+    isBadgeuseEnabled(),
     prisma.employee.findMany({ where: { statutEmploi: "actif" }, orderBy: [{ displayName: "asc" }, { email: "asc" }], select: { id: true, displayName: true, email: true, poste: true } }),
     prisma.rhTimeClock.findMany({ where: { date: { gte: start, lt: end } }, select: { employeeId: true, heuresMin: true } }),
     prisma.rhPayrollElement.findMany({ where: { mois }, orderBy: { createdAt: "asc" }, select: { id: true, employeeId: true, type: true, label: true, montant: true, statut: true } }),
     prisma.rhPayrollSend.findMany({ where: { mois }, orderBy: { sentAt: "desc" }, take: 5 }),
+    prisma.contract.findMany({ where: { statut: "actif" }, select: { employeeId: true, heuresHebdo: true, horairesJson: true } }),
+    prisma.rhHoliday.findMany({ where: { date: { gte: start, lt: end } }, select: { date: true } }),
+    prisma.rhLeaveRequest.findMany({ where: { statut: "approved", startDate: { lt: end }, endDate: { gte: start } }, select: { employeeId: true, startDate: true, endDate: true } }),
   ]);
 
   const workedByEmp = new Map<string, number>();
-  for (const c of clocks) workedByEmp.set(c.employeeId, (workedByEmp.get(c.employeeId) ?? 0) + c.heuresMin);
+  if (badgeuse) {
+    for (const c of clocks) workedByEmp.set(c.employeeId, (workedByEmp.get(c.employeeId) ?? 0) + c.heuresMin);
+  } else {
+    // Badgeuse OFF → heures du mois = horaires prévus au contrat, hors fériés et absences approuvées.
+    const dk = (d: Date) => d.toISOString().slice(0, 10);
+    const holiSet = new Set(holidays.map((h) => dk(h.date)));
+    const absent = new Set<string>();
+    for (const l of leaves) {
+      for (let t = new Date(l.startDate); t <= l.endDate; t = new Date(t.getTime() + 86400000)) absent.add(`${l.employeeId}|${dk(t)}`);
+    }
+    const ctById = new Map(contracts.map((c) => [c.employeeId, c]));
+    for (const emp of employees) {
+      const ct = ctById.get(emp.id); if (!ct) continue;
+      const sched = parseSchedule(ct.horairesJson ?? null, ct.heuresHebdo);
+      let tot = 0;
+      for (let d = new Date(start); d < end; d = new Date(d.getTime() + 86400000)) {
+        const k = dk(d);
+        if (holiSet.has(k) || absent.has(`${emp.id}|${k}`)) continue;
+        tot += plannedNetForDate(sched, d);
+      }
+      workedByEmp.set(emp.id, tot);
+    }
+  }
   const elByEmp = new Map<string, typeof elements>();
   for (const e of elements) { const a = elByEmp.get(e.employeeId) ?? []; a.push(e); elByEmp.set(e.employeeId, a); }
 

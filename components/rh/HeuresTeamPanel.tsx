@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
 import { fmtHM } from "@/lib/rh/time";
 
-type Day = { min: number; tag: string | null };
+type Day = { plannedMin: number; actualMin: number; min: number; tag: string | null };
 type Row = { employeeId: string; name: string; poste: string | null; contractHours: number; days: Day[]; calc: WeekCalc; validationStatus: string };
 type WeekCalc = { totalMin: number; contractMin: number; deltaMin: number; sup25Min: number; sup50Min: number; recupMin: number; majEquivMin: number };
-type Week = { isoWeek: string; days: string[]; holidays: string[]; rows: Row[] };
+type Week = { isoWeek: string; days: string[]; holidays: string[]; badgeuse: boolean; rows: Row[] };
 
 const DOW = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const TAG_CLS: Record<string, string> = {
@@ -66,8 +66,30 @@ export function HeuresTeamPanel({ initialWeek }: { initialWeek: string }) {
 
   const range = data ? `${fmtDate(data.days[0])} → ${fmtDate(data.days[6])}` : "";
 
+  const toggleBadgeuse = async () => {
+    if (!data) return;
+    const next = !data.badgeuse;
+    if (!confirm(next ? "Réactiver la badgeuse ? Les salariés pointeront à nouveau leurs heures." : "Désactiver la badgeuse ? Les salariés seront réputés présents aux horaires de leur contrat.")) return;
+    const r = await fetch("/api/rh/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ badgeuseEnabled: next }) });
+    if (!r.ok) return;
+    load(iso);
+  };
+
   return (
     <div className="space-y-4">
+      {/* Réglage badgeuse */}
+      {data && (
+        <div className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-2.5 ${data.badgeuse ? "border-border bg-card" : "border-sky-500/40 bg-sky-500/[0.06]"}`}>
+          <span className="text-[13px] text-foreground">
+            <b>Badgeuse</b> {data.badgeuse ? "activée" : "désactivée"} —{" "}
+            <span className="text-muted-foreground">{data.badgeuse ? "heures issues des pointages." : "présence = horaires du contrat (les absences restent déduites)."}</span>
+          </span>
+          <button type="button" onClick={toggleBadgeuse}
+            className={`shrink-0 h-8 rounded-lg px-3 text-caption font-medium ring-1 transition-colors ${data.badgeuse ? "bg-background text-foreground ring-border hover:bg-secondary" : "bg-sky-500 text-white ring-sky-500"}`}>
+            {data.badgeuse ? "Désactiver" : "Réactiver"}
+          </button>
+        </div>
+      )}
       {/* Navigateur de semaine */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-1.5">

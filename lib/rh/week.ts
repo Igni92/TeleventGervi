@@ -9,6 +9,8 @@
  */
 import { prisma } from "@/lib/prisma";
 import { computeWeek, typicalDayMinutes, type DayTag, type WeekCalc } from "@/lib/rh/time";
+import { parseSchedule, plannedWeek } from "@/lib/rh/schedule";
+import { isBadgeuseEnabled } from "@/lib/rh/settings";
 
 // ── Maths semaine ISO (en UTC, jours à 00:00) ───────────────────────────────
 function toUTCDay(d: Date): Date {
@@ -55,7 +57,7 @@ const dayKey = (d: Date) => d.toISOString().slice(0, 10);
 const leaveTypeToTag = (t: string): DayTag =>
   t === "cp" || t === "conges" ? "conges" : t === "recup" ? "recup" : t === "maladie" ? "maladie" : "absent";
 
-export interface TeamDay { min: number; tag: DayTag | null }
+export interface TeamDay { plannedMin: number; actualMin: number; min: number; tag: DayTag | null }
 export interface TeamRow {
   employeeId: string;
   name: string;
@@ -69,6 +71,7 @@ export interface TeamWeek {
   isoWeek: string;
   days: string[];        // 7 dates ISO "YYYY-MM-DD"
   holidays: string[];    // dates fériées de la semaine
+  badgeuse: boolean;     // badgeuse activée ? (false → présence = horaires contrat)
   rows: TeamRow[];
 }
 
@@ -78,17 +81,18 @@ export async function gatherTeamWeek(iso: string): Promise<TeamWeek> {
   const start = days[0]; const end = new Date(days[6]); end.setUTCDate(end.getUTCDate() + 1);
   const dayKeys = days.map(dayKey);
 
-  const [employees, contracts, clocks, leaves, holidays, sheets] = await Promise.all([
+  const [badgeuse, employees, contracts, clocks, leaves, holidays, sheets] = await Promise.all([
+    isBadgeuseEnabled(),
     prisma.employee.findMany({ where: { statutEmploi: "actif" }, orderBy: [{ displayName: "asc" }, { email: "asc" }], select: { id: true, displayName: true, email: true, poste: true } }),
-    prisma.contract.findMany({ where: { statut: "actif" }, select: { employeeId: true, heuresHebdo: true } }),
+    prisma.contract.findMany({ where: { statut: "actif" }, select: { employeeId: true, heuresHebdo: true, horairesJson: true } }),
     prisma.rhTimeClock.findMany({ where: { date: { gte: start, lt: end } }, select: { employeeId: true, date: true, heuresMin: true } }),
     prisma.rhLeaveRequest.findMany({ where: { statut: "approved", startDate: { lt: end }, endDate: { gte: start } }, select: { employeeId: true, type: true, startDate: true, endDate: true } }),
     prisma.rhHoliday.findMany({ where: { date: { gte: start, lt: end } }, select: { date: true } }),
-    prisma.rhWeekSheet.findMany({ where: { isoWeek: iso }, select: { employeeId: true, validationStatus: true } }),
+    prisma.rhWeekSheet.findMany({ where: { isoWeek: iso }, select: { employeeId: true, validationStatus: true, days: true } }),
   ]);
 
-  const contractByEmp = new Map(contracts.map((c) => [c.employeeId, c.heuresHebdo]));
-  const sheetByEmp = new Map(sheets.map((s) => [s.employeeId, s.validationStatus]));
+  const contractByEmp = new Map(contracts.map((c) => [c.employeeId, c]));
+  const sheetByEmp = new Map(sheets.map((s) => [s.employeeId, s]));
   const holidaySet = new Set(holidays.map((h) => dayKey(h.date)));
   // minutes badgées : (empId|dayKey) → minutes
   const clockMap = new Map<string, number>();
@@ -101,34 +105,51 @@ export async function gatherTeamWeek(iso: string): Promise<TeamWeek> {
       if (d >= s && d <= e) leaveMap.set(`${l.employeeId}|${dayKey(d)}`, leaveTypeToTag(l.type));
     }
   }
+  // Overrides manuels du planning (RhWeekSheet.days JSON = [{min?,tag?} ×7]).
+  const parseDays = (json: string): ({ min?: number; tag?: DayTag } | null)[] => {
+    try { const a = JSON.parse(json); return Array.isArray(a) ? a : []; } catch { return []; }
+  };
 
   const rows: TeamRow[] = employees.map((emp) => {
-    const contractHours = contractByEmp.get(emp.id) ?? 35;
+    const contract = contractByEmp.get(emp.id);
+    const contractHours = contract?.heuresHebdo ?? 35;
     const typical = typicalDayMinutes(contractHours);
+    const sched = parseSchedule(contract?.horairesJson ?? null, contractHours);
+    const planned = plannedWeek(sched, days);
+    const sheet = sheetByEmp.get(emp.id);
+    const overrides = sheet ? parseDays(sheet.days) : [];
     const workedMin: number[] = []; const tags: (DayTag | null)[] = []; const teamDays: TeamDay[] = [];
-    for (const d of days) {
-      const k = dayKey(d);
-      const min = clockMap.get(`${emp.id}|${k}`) ?? 0;
-      let tag: DayTag | null = null;
-      if (holidaySet.has(k)) tag = "ferie";
-      else if (min === 0 && leaveMap.has(`${emp.id}|${k}`)) tag = leaveMap.get(`${emp.id}|${k}`)!;
-      else if (min > 0) tag = "present";
-      workedMin.push(min); tags.push(tag);
-      teamDays.push({ min, tag });
+    for (let i = 0; i < 7; i++) {
+      const d = days[i]; const k = dayKey(d);
+      const plannedMin = planned[i];
+      const ov = overrides[i];
+      let tag: DayTag | null = null; let worked = 0; let actual = clockMap.get(`${emp.id}|${k}`) ?? 0;
+      if (ov && (ov.tag || typeof ov.min === "number")) {
+        // Édition manuelle du planning (prioritaire).
+        tag = ov.tag ?? ((ov.min ?? 0) > 0 ? "present" : null);
+        actual = typeof ov.min === "number" ? ov.min : actual;
+        worked = tag && tag !== "present" ? 0 : (typeof ov.min === "number" ? ov.min : plannedMin);
+      } else if (holidaySet.has(k)) {
+        tag = "ferie"; worked = 0;
+      } else if (badgeuse) {
+        if (actual > 0) { tag = "present"; worked = actual; }
+        else if (leaveMap.has(`${emp.id}|${k}`)) { tag = leaveMap.get(`${emp.id}|${k}`)!; worked = 0; }
+      } else {
+        // Badgeuse désactivée → présence = horaires prévus au contrat (sauf absence).
+        if (leaveMap.has(`${emp.id}|${k}`)) { tag = leaveMap.get(`${emp.id}|${k}`)!; worked = 0; }
+        else if (plannedMin > 0) { tag = "present"; worked = plannedMin; actual = plannedMin; }
+      }
+      workedMin.push(worked); tags.push(tag);
+      teamDays.push({ plannedMin, actualMin: actual, min: 0, tag });
     }
     const calc = computeWeek(workedMin, tags, contractHours, typical);
-    // reporte les crédits (congés/férié/récup) dans l'affichage jour
     for (let i = 0; i < 7; i++) teamDays[i].min = calc.dayMin[i];
     return {
-      employeeId: emp.id,
-      name: emp.displayName ?? emp.email,
-      poste: emp.poste,
-      contractHours,
-      days: teamDays,
-      calc,
-      validationStatus: sheetByEmp.get(emp.id) ?? "draft",
+      employeeId: emp.id, name: emp.displayName ?? emp.email, poste: emp.poste,
+      contractHours, days: teamDays, calc,
+      validationStatus: sheet?.validationStatus ?? "draft",
     };
   });
 
-  return { isoWeek: iso, days: dayKeys, holidays: [...holidaySet], rows };
+  return { isoWeek: iso, days: dayKeys, holidays: [...holidaySet], badgeuse, rows };
 }

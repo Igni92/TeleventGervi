@@ -6,6 +6,7 @@ import { Loader2, LogIn, LogOut, Clock, CalendarDays, Timer, MapPin, Lock, FileT
 import { MovingBorderButton } from "@/components/ui/moving-border-button";
 
 type MeState = {
+  badgeuseEnabled?: boolean;
   employee: { name: string | null; email: string };
   today: { inside: boolean; workedMin: number; punches: { kind: string; at: string }[] };
   contract: { type: string; heuresHebdo: number; heuresAnnuelles: number } | null;
@@ -72,8 +73,16 @@ export function EmployeeHome() {
         <h1 className="text-[22px] font-bold text-foreground leading-tight">{me.employee.name ?? me.employee.email}</h1>
       </header>
 
-      {/* Bouton BADGEUSE — géant, bordure animée (halo vert « J'arrive » / rouge
-          « Je pars »). Une seule action selon l'état. */}
+      {/* Badgeuse désactivée → présence gérée selon les horaires du contrat. */}
+      {me.badgeuseEnabled === false ? (
+        <div className="rounded-2xl border border-border bg-card p-5 text-center">
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-sky-500/12 text-sky-600 dark:text-sky-400 mb-2"><CalendarDays className="h-6 w-6" /></span>
+          <p className="text-[15px] font-semibold text-foreground">Présence selon votre contrat</p>
+          <p className="text-[12px] text-muted-foreground mt-1">La badgeuse est désactivée. Vos heures sont comptées selon les horaires prévus à votre contrat ; signalez vos absences via vos congés.</p>
+        </div>
+      ) : (
+      /* Bouton BADGEUSE — géant, bordure animée (halo vert « J'arrive » / rouge
+          « Je pars »). Une seule action selon l'état. */
       <MovingBorderButton
         type="button"
         onClick={() => punch(inside ? "out" : "in")}
@@ -96,6 +105,7 @@ export function EmployeeHome() {
           <MapPin className="h-3.5 w-3.5" /> Pointage géolocalisé
         </span>
       </MovingBorderButton>
+      )}
 
       {/* Heures du jour */}
       <div className="rounded-2xl border border-border bg-card p-4">
