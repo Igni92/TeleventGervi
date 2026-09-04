@@ -78,6 +78,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, leave: updated });
   }
 
+  if (action === "delete") {
+    if (!c.manager) return NextResponse.json({ error: "Réservé à la direction" }, { status: 403 });
+    const id = String(b.id ?? "");
+    await prisma.rhLeaveRequest.delete({ where: { id } }).catch(() => null);
+    // Retire aussi l'évènement d'absence du registre s'il existe.
+    await prisma.rhEvent.deleteMany({ where: { type: "absence", meta: { contains: `"leaveId":"${id}"` } } }).catch(() => null);
+    return NextResponse.json({ ok: true });
+  }
+
   if (action === "cancel") {
     const id = String(b.id ?? "");
     const leave = await prisma.rhLeaveRequest.findUnique({ where: { id }, select: { employeeId: true, statut: true } });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { isRhV2Enabled } from "@/lib/rh/flag";
+import { syncHireDate } from "@/lib/rh/hire";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +51,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
 
   const updated = await prisma.contract.update({ where: { id }, data }).catch(() => null);
   if (!updated) return NextResponse.json({ error: "Contrat introuvable" }, { status: 404 });
+  await syncHireDate(updated.employeeId); // entrée = 1er contrat (si la date de début a bougé)
   return NextResponse.json({ ok: true, contract: updated });
 }
 
@@ -60,6 +62,7 @@ export async function DELETE(_req: NextRequest, props: { params: Promise<{ id: s
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé à la direction" }, { status: 403 });
   const { id } = await props.params;
-  await prisma.contract.delete({ where: { id } }).catch(() => null);
+  const del = await prisma.contract.delete({ where: { id } }).catch(() => null);
+  if (del) await syncHireDate(del.employeeId);
   return NextResponse.json({ ok: true });
 }

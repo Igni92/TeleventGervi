@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { isRhV2Enabled } from "@/lib/rh/flag";
+import { syncHireDate } from "@/lib/rh/hire";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -84,5 +85,6 @@ export async function POST(req: NextRequest) {
     return c;
   });
 
+  await syncHireDate(employeeId); // entrée = 1er contrat
   return NextResponse.json({ ok: true, contract: created });
 }

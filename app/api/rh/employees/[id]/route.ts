@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { isRhV2Enabled } from "@/lib/rh/flag";
+import { syncHireDate } from "@/lib/rh/hire";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -79,10 +80,13 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     }
     if ("sapSlpCode" in b) data.sapSlpCode = typeof b.sapSlpCode === "number" ? b.sapSlpCode : null;
     await prisma.employee.update({ where: { id }, data });
-    // La date d'ENTRÉE pilote la date de début du contrat ACTIF (date de signature
-    // affichée dans la liste des contrats) — demande direction.
+    // La date d'ENTRÉE = début du PREMIER contrat : l'éditer déplace le contrat le
+    // plus ancien (ex. le CDD initial avant un CDI), pas le contrat actif. Puis
+    // l'entrée est re-dérivée du plus ancien contrat.
     if (newHire) {
-      await prisma.contract.updateMany({ where: { employeeId: id, statut: "actif" }, data: { dateDebut: newHire } });
+      const first = await prisma.contract.findFirst({ where: { employeeId: id }, orderBy: { dateDebut: "asc" }, select: { id: true } });
+      if (first) await prisma.contract.update({ where: { id: first.id }, data: { dateDebut: newHire } });
+      await syncHireDate(id);
     }
     return NextResponse.json({ ok: true });
   }

@@ -190,7 +190,7 @@ async function main() {
 
   // 8) JOURNAL : backfill d'évènements (embauche + contrats + congés) pour que la
   //    fiche salarié affiche l'historique. Idempotent (id déterministe).
-  const allEmps = await prisma.employee.findMany({ select: { id: true, hireDate: true, contracts: { select: { id: true, type: true, dateDebut: true } }, leaves: { select: { id: true, type: true, startDate: true, endDate: true, jours: true } } } });
+  const allEmps = await prisma.employee.findMany({ select: { id: true, hireDate: true, contracts: { select: { id: true, type: true, dateDebut: true } }, leaves: { select: { id: true, type: true, startDate: true, endDate: true, jours: true, statut: true } } } });
   for (const e of allEmps) {
     // Règle : la date d'ENTRÉE = date du PREMIER contrat (elles sont identiques).
     const firstContract = e.contracts.map((c) => c.dateDebut).sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
@@ -209,7 +209,10 @@ async function main() {
       if (!DRY) await prisma.rhEvent.upsert({ where: { id: `kvevt_ct_${c.id}`.slice(0, 190) }, create: { id: `kvevt_ct_${c.id}`.slice(0, 190), employeeId: e.id, type: "contrat", date: c.dateDebut, meta: JSON.stringify({ contractType: c.type }) }, update: {} });
       bump("events");
     }
+    // Registre : SEULS les congés réellement PRIS (approuvés) comptent comme
+    // absence. Les refusés/annulés ne sont pas des absences (bruit de test).
     for (const l of e.leaves) {
+      if ((l as { statut?: string }).statut && (l as { statut?: string }).statut !== "approved") continue;
       if (!DRY) await prisma.rhEvent.upsert({ where: { id: `kvevt_lv_${l.id}`.slice(0, 190) }, create: { id: `kvevt_lv_${l.id}`.slice(0, 190), employeeId: e.id, type: "absence", date: l.startDate, meta: JSON.stringify({ leaveType: l.type, jours: l.jours, start: l.startDate.toISOString(), end: l.endDate.toISOString() }) }, update: { meta: JSON.stringify({ leaveType: l.type, jours: l.jours, start: l.startDate.toISOString(), end: l.endDate.toISOString() }) } });
       bump("events");
     }

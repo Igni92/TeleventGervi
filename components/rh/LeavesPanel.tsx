@@ -67,6 +67,11 @@ export function LeavesPanel() {
     await fetch("/api/rh/leaves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "decide", id, decision }) });
     loadTeam(); load();
   };
+  const removeLeave = async (id: string) => {
+    if (!confirm("Supprimer définitivement ce congé ?")) return;
+    await fetch("/api/rh/leaves", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id }) });
+    load();
+  };
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   const pendingTeam = (team ?? []).filter((l) => l.statut === "pending");
@@ -128,6 +133,7 @@ export function LeavesPanel() {
                 <div className="flex items-center gap-2 shrink-0">
                   <span className={`rounded-md px-2 py-0.5 text-[11.5px] font-semibold ${s.cls}`}>{s.label}</span>
                   {l.statut === "pending" && <button type="button" onClick={() => cancel(l.id)} className="text-[11px] text-muted-foreground hover:text-destructive">Annuler</button>}
+                  {isManager && <button type="button" onClick={() => removeLeave(l.id)} title="Supprimer" className="text-[11px] text-muted-foreground hover:text-destructive">Suppr.</button>}
                 </div>
               </li>
             );
