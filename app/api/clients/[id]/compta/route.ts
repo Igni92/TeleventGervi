@@ -23,12 +23,15 @@ type ComptaRow = {
   emailReception: string | null;
   adresseFacturation: string | null;
   relanceActive: boolean;
+  /** Langue de communication (courriers relance/cotation) : FR | EN | AR. */
+  langue: string;
 };
 
 async function readCompta(clientId: string): Promise<ComptaRow | null> {
   const rows = await prisma.$queryRaw<ComptaRow[]>(Prisma.sql`
     SELECT "emailCompta", "emailReception", "adresseFacturation",
-           COALESCE("relanceActive", true) AS "relanceActive"
+           COALESCE("relanceActive", true) AS "relanceActive",
+           COALESCE("langue", 'FR') AS "langue"
     FROM "Client"
     WHERE "id" = ${clientId}
     LIMIT 1;
@@ -74,6 +77,8 @@ const PatchSchema = z.object({
   adresseFacturation: z.string().trim().max(2000, "Trop long").nullable().optional(),
   // Activation des relances pour ce client (case à cocher liste Encours).
   relanceActive: z.boolean().optional(),
+  // Langue de communication (courriers) — restreinte à FR | EN | AR.
+  langue: z.enum(["FR", "EN", "AR"]).optional(),
 });
 
 export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
@@ -98,6 +103,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (parsed.data.emailReception !== undefined) sets.push(Prisma.sql`"emailReception" = ${norm(parsed.data.emailReception)}`);
   if (parsed.data.adresseFacturation !== undefined) sets.push(Prisma.sql`"adresseFacturation" = ${norm(parsed.data.adresseFacturation)}`);
   if (parsed.data.relanceActive !== undefined) sets.push(Prisma.sql`"relanceActive" = ${parsed.data.relanceActive}`);
+  if (parsed.data.langue !== undefined) sets.push(Prisma.sql`"langue" = ${parsed.data.langue}`);
 
   if (sets.length > 0) {
     const result = await prisma.$executeRaw(Prisma.sql`

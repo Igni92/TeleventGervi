@@ -20,6 +20,9 @@ interface Template {
 
 const TABLE_TOKEN = "{{TableauFactures}}";
 
+/** Langue de communication du client — pilote le jeu de modèles utilisé. */
+export type RelanceLangue = "FR" | "EN" | "AR";
+
 export const TEMPLATES: Record<RelanceCode, Template> = {
   R0: {
     subject: "Rappel d'échéance — Facture {{NumFacture}}",
@@ -256,8 +259,23 @@ export interface RenderedRelance {
  * niveau et le contexte donnés. Le texte sert d'aperçu / repli ; l'email est
  * envoyé en HTML.
  */
-export function renderRelance(level: RelanceCode, ctx: RelanceContext): RenderedRelance {
-  const tpl = TEMPLATES[level];
+/**
+ * Surcharges de modèles PAR LANGUE (EN / AR). Vides pour l'instant : le contenu
+ * traduit des courriers — en particulier les niveaux à portée juridique (R4 mise
+ * en demeure, R5 contentieux) et le sens de lecture RTL de l'arabe — doit être
+ * rédigé et VALIDÉ par la direction/le conseil juridique avant activation. Tant
+ * qu'une langue n'a pas son modèle, on retombe proprement sur le FR (aucun envoi
+ * dans une langue partiellement traduite). Ajouter une traduction = remplir la
+ * case correspondante, sans toucher au moteur.
+ */
+export const TEMPLATE_OVERRIDES: Partial<Record<RelanceLangue, Partial<Record<RelanceCode, Template>>>> = {
+  EN: {},
+  AR: {},
+};
+
+export function renderRelance(level: RelanceCode, ctx: RelanceContext, langue: RelanceLangue = "FR"): RenderedRelance {
+  // Repli sur le modèle FR tant que la langue n'a pas son modèle validé.
+  const tpl = TEMPLATE_OVERRIDES[langue]?.[level] ?? TEMPLATES[level];
   const subject = fuse(tpl.subject, ctx.fields);
 
   // ── Découpe en blocs (séparés par ligne vide), le tableau étant un bloc à part.

@@ -13,13 +13,22 @@ import { Label } from "@/components/ui/label";
  * (vit côté SAP via ClientDeliveryMode).
  */
 
+type Langue = "FR" | "EN" | "AR";
 type Compta = {
   emailCompta: string | null;
+  langue: Langue;
 };
+
+const LANGUES: { value: Langue; label: string }[] = [
+  { value: "FR", label: "Français" },
+  { value: "EN", label: "Anglais (English)" },
+  { value: "AR", label: "Arabe (العربية)" },
+];
 
 export function CompteForm({ clientId }: { clientId: string }) {
   const [data, setData] = useState<Compta | null>(null);
   const [emailCompta, setEmailCompta] = useState("");
+  const [langue, setLangue] = useState<Langue>("FR");
   const [loading, setLoading] = useState(true);
   const [saving, startSave] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -33,8 +42,10 @@ export function CompteForm({ clientId }: { clientId: string }) {
       .then((d) => {
         if (cancelled) return;
         if (d.ok) {
-          setData({ emailCompta: d.emailCompta ?? null });
+          const lg: Langue = d.langue === "EN" || d.langue === "AR" ? d.langue : "FR";
+          setData({ emailCompta: d.emailCompta ?? null, langue: lg });
           setEmailCompta(d.emailCompta ?? "");
+          setLangue(lg);
         } else {
           setError(d.error ?? "Erreur");
         }
@@ -44,7 +55,7 @@ export function CompteForm({ clientId }: { clientId: string }) {
     return () => { cancelled = true; };
   }, [clientId]);
 
-  const dirty = data != null && (emailCompta || null) !== data.emailCompta;
+  const dirty = data != null && ((emailCompta || null) !== data.emailCompta || langue !== data.langue);
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -54,14 +65,16 @@ export function CompteForm({ clientId }: { clientId: string }) {
       const res = await fetch(`/api/clients/${clientId}/compta`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailCompta: emailCompta || null }),
+        body: JSON.stringify({ emailCompta: emailCompta || null, langue }),
       });
       const d = await res.json().catch(() => null);
       if (!res.ok || !d?.ok) {
         setError(d?.error ?? `Erreur ${res.status}`);
         return;
       }
-      setData({ emailCompta: d.emailCompta ?? null });
+      const lg: Langue = d.langue === "EN" || d.langue === "AR" ? d.langue : "FR";
+      setData({ emailCompta: d.emailCompta ?? null, langue: lg });
+      setLangue(lg);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     });
@@ -83,6 +96,21 @@ export function CompteForm({ clientId }: { clientId: string }) {
         />
         <p className="text-[11px] text-muted-foreground">
           Pour les factures et relances — distinct des emails des interlocuteurs (onglet Commercial).
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="langue">Langue de communication</Label>
+        <select
+          id="langue"
+          value={langue}
+          onChange={(e) => setLangue(e.target.value as Langue)}
+          className="h-9 w-full rounded-md border border-input bg-background px-2 text-body"
+        >
+          {LANGUES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+        </select>
+        <p className="text-[11px] text-muted-foreground">
+          Langue des courriers générés (relance, cotation…). Défaut : Français.
         </p>
       </div>
 

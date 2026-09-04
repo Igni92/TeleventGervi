@@ -160,6 +160,11 @@ model Client {
   // SQL (cf. scripts/ddl-client-relance-active.mjs) — lue/écrite en $queryRaw
   // tant que le client Prisma n'est pas régénéré (même convention qu'activeTelevente).
   relanceActive      Boolean               @default(true)
+  // Langue de communication (courriers relance/cotation) : FR | EN | AR. Défaut
+  // FR. Colonne ajoutée en raw SQL (cf. scripts/ddl-client-langue.mjs) — lue/
+  // écrite en $queryRaw tant que le client Prisma n'est pas régénéré (même
+  // convention que relanceActive / activeTelevente).
+  langue             String                @default("FR")
   // VENDEUR (≠ commercial assigné) : celui qui réalise concrètement les ventes,
   // déduit du dernier BL/commande SAP. Non commissionné — sert au routage du
   // travail. Réassignable à la main. Le `commercial` (account manager) reste la

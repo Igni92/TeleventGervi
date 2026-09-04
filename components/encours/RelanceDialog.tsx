@@ -91,6 +91,9 @@ export function RelanceDialog({
   const [sending, setSending] = useState(false);
   const [sentLevel, setSentLevel] = useState<RelanceCode | null>(null);
   const [logs, setLogs] = useState<RelanceLogRow[]>([]);
+  // Garde-fou de validation : l'envoi n'est débloqué qu'après relecture du
+  // courrier COMPLET (« J'ai relu »). Remis à zéro à chaque aperçu / niveau.
+  const [reviewed, setReviewed] = useState(false);
   // Anti-course : on ignore la réponse d'un aperçu si un autre a été demandé depuis.
   const reqRef = useRef(0);
 
@@ -101,6 +104,7 @@ export function RelanceDialog({
     const myReq = ++reqRef.current;
     setLoading(true);
     setPreview(null);
+    setReviewed(false); // nouveau courrier → relecture à refaire
     try {
       const r = await fetch("/api/relance/preview", {
         method: "POST",
@@ -211,11 +215,11 @@ export function RelanceDialog({
                   </span>
                   <span className="w-9 shrink-0 text-body font-bold tnum text-foreground">{l.code}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-body font-medium text-foreground">
+                    <span className="block text-body font-medium text-foreground">
                       {l.libelle}
                       {suggested === l.code && <span className="ml-1.5 text-caption font-semibold text-brand-600 dark:text-brand-400">(suggéré)</span>}
                     </span>
-                    <span className="block truncate text-caption text-muted-foreground">{l.declenchement} · {l.canal} · {l.tonalite}</span>
+                    <span className="block text-caption text-muted-foreground">{l.declenchement} · {l.canal} · {l.tonalite}</span>
                   </span>
                 </button>
               );
@@ -256,15 +260,17 @@ export function RelanceDialog({
               <div className="rounded-lg border border-border overflow-hidden">
                 <div className="flex items-center gap-2 px-3 py-2 bg-secondary/60 border-b border-border">
                   <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="text-caption font-semibold text-foreground truncate">{preview.subject}</span>
+                  {/* Objet affiché EN ENTIER (plus tronqué) — validation avant envoi. */}
+                  <span className="text-caption font-semibold text-foreground break-words">{preview.subject}</span>
                 </div>
                 {/* Papier de l'email : document reçu par le client, volontairement
-                    blanc dans les deux thèmes (l'email ne suit pas le thème app). */}
+                    blanc dans les deux thèmes (l'email ne suit pas le thème app).
+                    Hauteur augmentée pour lire le courrier COMPLET avant envoi. */}
                 <iframe
                   title="Aperçu de la relance"
                   srcDoc={preview.html}
                   sandbox=""
-                  className="w-full h-[300px]"
+                  className="w-full h-[460px]"
                   style={{ background: "hsl(0 0% 100%)" }}
                 />
               </div>
@@ -355,15 +361,24 @@ export function RelanceDialog({
             {meta.canal.includes("LRAR") && <b className="text-amber-600 dark:text-amber-400">Niveau LRAR : l&apos;email de test ne remplace pas le recommandé postal. </b>}
             Chaque envoi est journalisé (piste d&apos;audit).
           </p>
-          <Button
-            onClick={send}
-            disabled={sending || loading || !preview || sentLevel === level || preview?.relanceActive === false}
-            title={preview?.relanceActive === false ? "Relances désactivées pour ce client" : undefined}
-            className="shrink-0"
-          >
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : sentLevel === level ? <Check className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-            {sentLevel === level ? "Envoyé" : preview?.relanceActive === false ? "Relances désactivées" : meta.serviceOnly ? "Envoyer à la compta" : preview?.recipient.testMode ? "Envoyer (test)" : "Envoyer"}
-          </Button>
+          <div className="shrink-0 flex items-center gap-3">
+            {/* Validation obligatoire : relire le courrier complet avant d'envoyer. */}
+            {preview && sentLevel !== level && (
+              <label className="flex items-center gap-2 cursor-pointer select-none text-caption text-foreground">
+                <input type="checkbox" checked={reviewed} onChange={(e) => setReviewed(e.target.checked)} className="h-4 w-4 accent-brand-500" />
+                J&apos;ai relu le courrier
+              </label>
+            )}
+            <Button
+              onClick={send}
+              disabled={sending || loading || !preview || sentLevel === level || preview?.relanceActive === false || !reviewed}
+              title={preview?.relanceActive === false ? "Relances désactivées pour ce client" : !reviewed && sentLevel !== level ? "Cochez « J'ai relu le courrier » pour envoyer" : undefined}
+              className="shrink-0"
+            >
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : sentLevel === level ? <Check className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+              {sentLevel === level ? "Envoyé" : preview?.relanceActive === false ? "Relances désactivées" : meta.serviceOnly ? "Envoyer à la compta" : preview?.recipient.testMode ? "Envoyer (test)" : "Envoyer"}
+            </Button>
+          </div>
         </footer>
       </div>
     </div>,

@@ -269,7 +269,13 @@ function ComptaEmailsModal({ client, onClose, onSaved }: { client: ClientEncours
 export function Encours() {
   const [data, setData] = useState<EncoursData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [overdueOnly, setOverdueOnly] = useState(false);
+  // Filtre de retard MULTI-SÉLECTION : ensemble de tranches cochées
+  // indépendamment. Vide = aucun filtre (tous les clients). « aterme » = pas de
+  // facture en retard ; b3045 = retard ≤ 45 j ; b4590 = 45-90 j ; b90 = > 90 j.
+  const [bands, setBands] = useState<Set<"aterme" | "b3045" | "b4590" | "b90">>(new Set());
+  const toggleBand = useCallback((b: "aterme" | "b3045" | "b4590" | "b90") => {
+    setBands((prev) => { const n = new Set(prev); n.has(b) ? n.delete(b) : n.add(b); return n; });
+  }, []);
   const [search, setSearch] = useState("");
   const [drill, setDrill] = useState<ClientEncours | null>(null);
   const [relance, setRelance] = useState<ClientEncours | null>(null);
@@ -322,7 +328,13 @@ export function Encours() {
     if (!data) return [];
     const q = debSearch.trim().toLowerCase();
     const filtered = data.clients
-      .filter((c) => (!overdueOnly || c.countLate > 0))
+      // Multi-sélection (OR) : un client passe s'il correspond à AU MOINS une
+      // tranche cochée. Set vide → pas de filtre.
+      .filter((c) => bands.size === 0
+        || (bands.has("aterme") && c.countLate === 0)
+        || (bands.has("b3045") && c.b3045 > 0)
+        || (bands.has("b4590") && c.b4590 > 0)
+        || (bands.has("b90") && c.b90 > 0))
       .filter((c) => !q || c.cardName.toLowerCase().includes(q) || c.cardCode.toLowerCase().includes(q));
     const dir = sort.dir === "asc" ? 1 : -1;
     return [...filtered].sort((a, b) =>
@@ -332,7 +344,7 @@ export function Encours() {
         ? dir * (retardTotal(a) - retardTotal(b))
         : dir * ((a[sort.key] as number) - (b[sort.key] as number)),
     );
-  }, [data, overdueOnly, debSearch, sort]);
+  }, [data, bands, debSearch, sort]);
 
   // Détail à jour : si la relance/compta a été modifiée pendant l'ouverture,
   // on relit la version fraîche depuis `data` pour la modale de détail.
@@ -346,13 +358,13 @@ export function Encours() {
       {/* KPIs — zone de PRISE D'INFO : cartes teintées CLIQUABLES (filtres). */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Kpi accent="brand" label="Encours total" value={data ? eur(data.totals.encours) : null}
-          active={!overdueOnly} onClick={() => setOverdueOnly(false)} />
+          active={bands.size === 0} onClick={() => setBands(new Set())} />
         <Kpi accent="amber" label="Retard ≤ 45 j" value={data ? eur(data.totals.b3045) : null}
-          active={overdueOnly} onClick={() => setOverdueOnly(true)} />
+          active={bands.has("b3045")} onClick={() => toggleBand("b3045")} />
         <Kpi accent="rose" label="Retard 45-90 j" value={data ? eur(data.totals.b4590) : null}
-          active={overdueOnly} onClick={() => setOverdueOnly(true)} />
+          active={bands.has("b4590")} onClick={() => toggleBand("b4590")} />
         <Kpi accent="rose" label="Retard > 90 j" value={data ? eur(data.totals.b90) : null}
-          active={overdueOnly} onClick={() => setOverdueOnly(true)} />
+          active={bands.has("b90")} onClick={() => toggleBand("b90")} />
       </div>
 
       {/* Données partielles : au moins un lot de soldes/avoirs SAP a échoué */}
@@ -373,14 +385,33 @@ export function Encours() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un client…" className="pl-9" />
         </div>
-        <Button
-          variant={overdueOnly ? "destructive" : "outline"}
-          size="sm" className="h-9"
-          onClick={() => setOverdueOnly((v) => !v)}
-          aria-pressed={overdueOnly}
-        >
-          En retard seulement
-        </Button>
+        {/* Filtres de retard multi-sélection — cocher indépendamment une ou
+            plusieurs tranches (OR). « Tout » réaffiche l'ensemble. */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {([
+            { key: "aterme", label: "À terme" },
+            { key: "b3045", label: "≤ 45 j" },
+            { key: "b4590", label: "45-90 j" },
+            { key: "b90", label: "> 90 j" },
+          ] as const).map((b) => {
+            const on = bands.has(b.key);
+            return (
+              <button
+                key={b.key} type="button" onClick={() => toggleBand(b.key)} aria-pressed={on}
+                className={`h-9 rounded-lg px-3 text-caption font-medium transition-colors ring-1 ${
+                  on ? "bg-brand-500 text-black ring-brand-500" : "bg-background text-foreground ring-border hover:bg-secondary"
+                }`}
+              >
+                {b.label}
+              </button>
+            );
+          })}
+          {bands.size > 0 && (
+            <button type="button" onClick={() => setBands(new Set())} className="h-9 rounded-lg px-2.5 text-caption text-muted-foreground hover:text-foreground">
+              Tout
+            </button>
+          )}
+        </div>
         <Button variant="outline" size="sm" className="h-9" onClick={load} disabled={loading}>
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Actualiser
         </Button>
