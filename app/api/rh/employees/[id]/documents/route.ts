@@ -23,7 +23,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
   const { id } = await props.params;
   const docs = await prisma.rhDocument.findMany({
     where: { employeeId: id },
-    select: { id: true, type: true, nom: true, mime: true, visibleSalarie: true, createdAt: true, uploadedBy: true },
+    select: { id: true, type: true, nom: true, mime: true, visibleSalarie: true, createdAt: true, uploadedBy: true, contractId: true },
     orderBy: { createdAt: "desc" },
   });
   return NextResponse.json({ ok: true, documents: docs, types: DOC_TYPES });
@@ -46,9 +46,17 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   if (!contenu.startsWith("data:")) return NextResponse.json({ error: "Fichier invalide" }, { status: 400 });
   if (contenu.length > MAX_BYTES) return NextResponse.json({ error: "Fichier trop lourd (max 8 Mo)" }, { status: 413 });
 
+  // Rattachement optionnel à un contrat : on vérifie qu'il appartient bien au salarié.
+  let contractId: string | null = null;
+  if (b.contractId) {
+    const ct = await prisma.contract.findFirst({ where: { id: String(b.contractId), employeeId: id }, select: { id: true } });
+    if (!ct) return NextResponse.json({ error: "Contrat introuvable pour ce salarié" }, { status: 400 });
+    contractId = ct.id;
+  }
+
   const doc = await prisma.rhDocument.create({
-    data: { employeeId: id, type, nom, mime: b.mime ? String(b.mime) : null, contenu, visibleSalarie: b.visibleSalarie !== false, uploadedBy: email },
-    select: { id: true, type: true, nom: true, visibleSalarie: true, createdAt: true },
+    data: { employeeId: id, contractId, type, nom, mime: b.mime ? String(b.mime) : null, contenu, visibleSalarie: b.visibleSalarie !== false, uploadedBy: email },
+    select: { id: true, type: true, nom: true, visibleSalarie: true, createdAt: true, contractId: true },
   });
   await prisma.rhEvent.create({ data: { employeeId: id, type: "note", date: new Date(), createdBy: email, meta: JSON.stringify({ text: `Document ajouté : ${nom}` }) } });
   return NextResponse.json({ ok: true, document: doc });

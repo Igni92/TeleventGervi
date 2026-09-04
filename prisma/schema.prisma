@@ -1487,7 +1487,8 @@ model Contract {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee  Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  documents RhDocument[]
 
   @@index([employeeId])
   @@index([statut])
@@ -1678,6 +1679,9 @@ model RhPayrollSend {
 model RhDocument {
   id             String   @id @default(cuid())
   employeeId     String?
+  // Rattachement OPTIONNEL à un contrat précis (sinon = coffre-fort général du
+  // salarié). Colonne additive (cf. deploy/sql/rh-doc-contract.sql).
+  contractId     String?
   type           String // contrat | bulletin | attestation | justificatif | autre
   nom            String
   mime           String?
@@ -1687,8 +1691,10 @@ model RhDocument {
   createdAt      DateTime @default(now())
 
   employee Employee? @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  contract Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
 
   @@index([employeeId])
+  @@index([contractId])
   @@index([type])
 }
 

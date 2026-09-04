@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, LogOut, RotateCcw, StickyNote, FileSignature, UserCheck, Plane, Plus, CalendarDays, Pencil, Check, Upload, Download, Trash2, FileText, Lock } from "lucide-react";
+import { Loader2, LogOut, RotateCcw, StickyNote, FileSignature, UserCheck, Plane, Plus, CalendarDays, Pencil, Check, Upload, Download, Trash2, FileText, Lock, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type Contract = { id: string; type: string; statut: string; dateDebut: string; dateFin: string | null; essaiFin: string | null; heuresHebdo: number; saisonLabel: string | null };
 type Event = { id: string; type: string; date: string; meta: string | null; createdBy: string | null };
-type Doc = { id: string; type: string; nom: string; mime: string | null; visibleSalarie: boolean; createdAt: string; uploadedBy: string | null };
+type Doc = { id: string; type: string; nom: string; mime: string | null; visibleSalarie: boolean; createdAt: string; uploadedBy: string | null; contractId: string | null };
 type Emp = {
   id: string; email: string; displayName: string | null; poste: string | null; service: string | null;
   sapSlpName: string | null; statutEmploi: string; hireDate: string | null; exitDate: string | null; exitReason: string | null;
@@ -57,10 +57,10 @@ export function EmployeeFiche({ id }: { id: string }) {
   const [hireVal, setHireVal] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploadType, setUploadType] = useState("contrat");
-  const [editCt, setEditCt] = useState<string | null>(null);
-  const [editType, setEditType] = useState<string | null>(null);
   const [addCt, setAddCt] = useState(false);
-  const editVals = useRef<Record<string, unknown>>({});
+  const [editContract, setEditContract] = useState<Contract | null>(null);
+  // Cible de l'upload en cours : coffre-fort général (contractId null) ou contrat précis.
+  const pendingUpload = useRef<{ contractId: string | null; type: string }>({ contractId: null, type: "contrat" });
 
   const load = useCallback(async () => {
     const [r, rd] = await Promise.all([
@@ -81,21 +81,12 @@ export function EmployeeFiche({ id }: { id: string }) {
     toast.success(ok); load(); return true;
   };
 
-  const patchContract = async (cid: string) => {
-    const v = editVals.current;
-    if (Object.keys(v).length === 0) { setEditCt(null); return; }
-    const r = await fetch(`/api/rh/contracts/${cid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(v) });
-    const j = await r.json();
-    if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
-    toast.success("Contrat mis à jour"); setEditCt(null); setEditType(null); editVals.current = {}; load();
-  };
-
   const deleteContract = async (cid: string) => {
     if (!confirm("Supprimer ce contrat ? (correction — action définitive)")) return;
     const r = await fetch(`/api/rh/contracts/${cid}`, { method: "DELETE" });
     const j = await r.json();
     if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
-    toast.success("Contrat supprimé"); setEditCt(null); load();
+    toast.success("Contrat supprimé"); setEditContract(null); load();
   };
 
   const saveHire = async () => {
@@ -108,14 +99,17 @@ export function EmployeeFiche({ id }: { id: string }) {
     if (await action({ action: "update", hireDate: hireVal || null }, "Date d'entrée mise à jour")) setEditHire(false);
   };
 
+  // Déclenche le sélecteur de fichier pour une cible donnée (coffre-fort ou contrat).
+  const pickFile = (contractId: string | null, type: string) => { pendingUpload.current = { contractId, type }; fileRef.current?.click(); };
   const upload = async (file: File) => {
     if (file.size > 8 * 1024 * 1024) { toast.error("Fichier trop lourd (max 8 Mo)"); return; }
+    const { contractId, type } = pendingUpload.current;
     const contenu = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = rej; fr.readAsDataURL(file); });
     const r = await fetch(`/api/rh/employees/${id}/documents`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: uploadType, nom: file.name, mime: file.type, contenu }) });
+      body: JSON.stringify({ type, nom: file.name, mime: file.type, contenu, contractId: contractId ?? undefined }) });
     const j = await r.json();
     if (!r.ok || !j.ok) { toast.error(j.error || "Échec du dépôt"); return; }
-    toast.success("Document ajouté"); setDocs((c) => [j.document, ...c]);
+    toast.success(contractId ? "Document rattaché au contrat" : "Document ajouté"); setDocs((c) => [j.document, ...c]);
   };
   const download = async (docId: string) => {
     const r = await fetch(`/api/rh/documents/${docId}`); const j = await r.json();
@@ -177,31 +171,34 @@ export function EmployeeFiche({ id }: { id: string }) {
         </div>
         <ul className="space-y-1.5">
           {emp.contracts.map((c) => {
-            const editing = editCt === c.id;
-            const editOpenEnded = OPEN_ENDED.has((editType ?? c.type));
+            const ctDocs = docs.filter((d) => d.contractId === c.id);
             return (
-            <li key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-[13px]">
-              {editing ? (
-                <div className="flex items-center gap-2 flex-wrap flex-1">
-                  <select defaultValue={c.type} onChange={(e) => { editVals.current.type = e.target.value; setEditType(e.target.value); }} className="h-8 rounded-md border border-input bg-background px-2 text-body">
-                    {CONTRACT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <Input type="number" defaultValue={c.heuresHebdo} onChange={(e) => (editVals.current.heuresHebdo = Number(e.target.value))} className="h-8 w-20" title="Heures/sem" />
-                  <Input type="date" defaultValue={dISO(c.dateDebut)} onChange={(e) => (editVals.current.dateDebut = e.target.value)} className="h-8 w-40" title="Début" />
-                  {!editOpenEnded && <Input type="date" defaultValue={dISO(c.dateFin)} onChange={(e) => (editVals.current.dateFin = e.target.value)} className="h-8 w-40" title="Fin (CDD/saison)" />}
-                  <Button size="sm" onClick={() => patchContract(c.id)}><Check className="h-3.5 w-3.5" /></Button>
-                  <button type="button" onClick={() => { setEditCt(null); setEditType(null); }} className="text-[11px] text-muted-foreground hover:text-foreground">Annuler</button>
-                  <button type="button" onClick={() => deleteContract(c.id)} title="Supprimer ce contrat" className="text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
-                </div>
-              ) : (
-                <>
-                  <span><b className="text-foreground">{c.type}</b> · {c.heuresHebdo}h/sem{c.saisonLabel ? ` · ${c.saisonLabel}` : ""}</span>
-                  <span className="flex items-center gap-2 text-muted-foreground tnum">
-                    {fmt(c.dateDebut)}{c.dateFin ? ` → ${fmt(c.dateFin)}` : ""}
-                    <span className={`rounded px-1.5 py-0.5 text-[11px] ${c.statut === "actif" ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300" : "bg-secondary text-muted-foreground"}`}>{c.statut}</span>
-                    <button type="button" onClick={() => { setEditCt(c.id); setEditType(c.type); editVals.current = {}; }} title="Modifier le contrat" className="text-muted-foreground hover:text-primary"><Pencil className="h-3 w-3" /></button>
-                  </span>
-                </>
+            <li key={c.id} className="rounded-lg border border-border bg-card px-3 py-2 text-[13px]">
+              <div className="flex items-center justify-between gap-3">
+                <span><b className="text-foreground">{c.type}</b> · {c.heuresHebdo}h/sem{c.saisonLabel ? ` · ${c.saisonLabel}` : ""}</span>
+                <span className="flex items-center gap-2 text-muted-foreground tnum">
+                  {fmt(c.dateDebut)}{c.dateFin ? ` → ${fmt(c.dateFin)}` : ""}
+                  <span className={`rounded px-1.5 py-0.5 text-[11px] ${c.statut === "actif" ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300" : "bg-secondary text-muted-foreground"}`}>{c.statut}</span>
+                  <button type="button" onClick={() => pickFile(c.id, "contrat")} title="Rattacher un document à ce contrat" className="text-muted-foreground hover:text-primary"><Paperclip className="h-3.5 w-3.5" /></button>
+                  <button type="button" onClick={() => setEditContract(c)} title="Modifier le contrat" className="text-muted-foreground hover:text-primary"><Pencil className="h-3 w-3" /></button>
+                </span>
+              </div>
+              {/* Documents rattachés à CE contrat */}
+              {ctDocs.length > 0 && (
+                <ul className="mt-1.5 space-y-1 border-t border-border/60 pt-1.5">
+                  {ctDocs.map((d) => (
+                    <li key={d.id} className="flex items-center justify-between gap-2 text-[12px]">
+                      <span className="inline-flex items-center gap-1.5 min-w-0 text-muted-foreground">
+                        <FileText className="h-3.5 w-3.5 shrink-0" /><span className="truncate text-foreground">{d.nom}</span>
+                        <span className="shrink-0">· {fmt(d.createdAt)}</span>
+                      </span>
+                      <span className="flex items-center gap-0.5 shrink-0">
+                        <button type="button" onClick={() => download(d.id)} title="Télécharger" className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary"><Download className="h-3.5 w-3.5" /></button>
+                        <button type="button" onClick={() => delDoc(d.id)} title="Supprimer" className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               )}
             </li>
             );
@@ -219,11 +216,11 @@ export function EmployeeFiche({ id }: { id: string }) {
               {Object.entries(DOC_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
             <input ref={fileRef} type="file" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} />
-            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}><Upload className="h-3.5 w-3.5" /> Déposer</Button>
+            <Button size="sm" variant="outline" onClick={() => pickFile(null, uploadType)}><Upload className="h-3.5 w-3.5" /> Déposer</Button>
           </div>
         </div>
         <ul className="space-y-1.5">
-          {docs.map((d) => (
+          {docs.filter((d) => !d.contractId).map((d) => (
             <li key={d.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-[13px]">
               <span className="inline-flex items-center gap-2 min-w-0">
                 <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -238,7 +235,7 @@ export function EmployeeFiche({ id }: { id: string }) {
               </span>
             </li>
           ))}
-          {docs.length === 0 && <li className="text-[13px] text-muted-foreground">Aucun document. Dépose un contrat, un bulletin, une attestation…</li>}
+          {docs.filter((d) => !d.contractId).length === 0 && <li className="text-[13px] text-muted-foreground">Aucun document général. Dépose un bulletin, une attestation… ou rattache un document à un contrat via l&apos;icône trombone.</li>}
         </ul>
       </section>
 
@@ -271,35 +268,56 @@ export function EmployeeFiche({ id }: { id: string }) {
       </section>
 
       {departOpen && <DepartDialog onClose={() => setDepartOpen(false)} onConfirm={async (exitDate, exitReason) => { if (await action({ action: "depart", exitDate, exitReason }, "Fin de contrat enregistrée")) setDepartOpen(false); }} />}
-      {addCt && <AddContractDialog employeeId={id} onClose={() => setAddCt(false)} onSaved={() => { setAddCt(false); load(); }} />}
+      {addCt && <ContractDialog employeeId={id} onClose={() => setAddCt(false)} onSaved={() => { setAddCt(false); load(); }} />}
+      {editContract && <ContractDialog employeeId={id} contract={editContract} onClose={() => setEditContract(null)} onSaved={() => { setEditContract(null); load(); }} onDelete={() => deleteContract(editContract.id)} />}
     </div>
   );
 }
 
-/** Ajout d'un contrat sur la fiche (correction / renouvellement). `cloturerPrecedents`
- *  optionnel : décoché = correction (garde les autres contrats tels quels). */
-function AddContractDialog({ employeeId, onClose, onSaved }: { employeeId: string; onClose: () => void; onSaved: () => void }) {
-  const [type, setType] = useState("CDI");
-  const [dateDebut, setDateDebut] = useState(new Date().toISOString().slice(0, 10));
-  const [dateFin, setDateFin] = useState("");
-  const [heuresHebdo, setHeuresHebdo] = useState("35");
+/** Ajout OU édition d'un contrat. Sans `contract` = ajout (POST). Avec `contract`
+ *  = modification (PATCH) d'un contrat déjà rentré, tous champs éditables + suppression. */
+function ContractDialog({ employeeId, contract, onClose, onSaved, onDelete }: {
+  employeeId: string; contract?: Contract; onClose: () => void; onSaved: () => void; onDelete?: () => void;
+}) {
+  const editMode = !!contract;
+  const [type, setType] = useState(contract?.type ?? "CDI");
+  const [statut, setStatut] = useState(contract?.statut ?? "actif");
+  const [dateDebut, setDateDebut] = useState(contract ? dISO(contract.dateDebut) : new Date().toISOString().slice(0, 10));
+  const [dateFin, setDateFin] = useState(contract ? dISO(contract.dateFin) : "");
+  const [essaiFin, setEssaiFin] = useState(contract ? dISO(contract.essaiFin) : "");
+  const [heuresHebdo, setHeuresHebdo] = useState(String(contract?.heuresHebdo ?? 35));
+  const [saisonLabel, setSaisonLabel] = useState(contract?.saisonLabel ?? "");
   const [cloturer, setCloturer] = useState(true);
   const [saving, setSaving] = useState(false);
   const openEnded = OPEN_ENDED.has(type);
+  const seasonal = type === "CDD" || type === "SAISONNIER";
+
   const submit = async () => {
     setSaving(true);
     try {
-      const r = await fetch("/api/rh/contracts", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employeeId, type, dateDebut, dateFin: openEnded ? undefined : (dateFin || undefined), heuresHebdo: Number(heuresHebdo) || 35, cloturerPrecedents: cloturer }) });
-      const j = await r.json();
-      if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
-      toast.success("Contrat ajouté"); onSaved();
+      if (editMode) {
+        const body: Record<string, unknown> = {
+          type, statut, dateDebut, essaiFin: essaiFin || null,
+          heuresHebdo: Number(heuresHebdo) || 35, saisonLabel: seasonal ? (saisonLabel || null) : null,
+          dateFin: openEnded ? null : (dateFin || null),
+        };
+        const r = await fetch(`/api/rh/contracts/${contract!.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const j = await r.json();
+        if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
+        toast.success("Contrat mis à jour"); onSaved();
+      } else {
+        const r = await fetch("/api/rh/contracts", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ employeeId, type, dateDebut, dateFin: openEnded ? undefined : (dateFin || undefined), essaiFin: essaiFin || undefined, heuresHebdo: Number(heuresHebdo) || 35, saisonLabel: seasonal ? (saisonLabel || undefined) : undefined, cloturerPrecedents: cloturer }) });
+        const j = await r.json();
+        if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
+        toast.success("Contrat ajouté"); onSaved();
+      }
     } finally { setSaving(false); }
   };
   return (
     <Dialog open onOpenChange={(o) => { if (!o && !saving) onClose(); }}>
       <DialogContent size="sm">
-        <DialogHeader className="text-left"><DialogTitle className="flex items-center gap-2"><FileSignature className="h-5 w-5" /> Ajouter un contrat</DialogTitle></DialogHeader>
+        <DialogHeader className="text-left"><DialogTitle className="flex items-center gap-2"><FileSignature className="h-5 w-5" /> {editMode ? "Modifier le contrat" : "Ajouter un contrat"}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
             <label className="block"><span className="text-caption font-medium">Type</span>
@@ -313,14 +331,32 @@ function AddContractDialog({ employeeId, onClose, onSaved }: { employeeId: strin
             <label className="block"><span className="text-caption font-medium">Début</span><Input type="date" value={dateDebut} onChange={(e) => setDateDebut(e.target.value)} className="mt-1" /></label>
             {!openEnded && <label className="block"><span className="text-caption font-medium">Fin (CDD/saison)</span><Input type="date" value={dateFin} onChange={(e) => setDateFin(e.target.value)} className="mt-1" /></label>}
           </div>
-          {openEnded && <p className="text-[11px] text-muted-foreground">{type} = durée indéterminée : aucune date de fin (elle n'apparaîtra qu'à la fin de contrat).</p>}
-          <label className="flex items-center gap-2 text-caption text-foreground">
-            <input type="checkbox" checked={cloturer} onChange={(e) => setCloturer(e.target.checked)} />
-            Clôturer le(s) contrat(s) actif(s) précédent(s)
-          </label>
-          <div className="grid grid-cols-2 gap-2 pt-1">
-            <Button variant="outline" size="xl" onClick={onClose} disabled={saving}>Annuler</Button>
-            <Button size="xl" onClick={submit} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Ajouter</Button>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block"><span className="text-caption font-medium">Fin période d&apos;essai</span><Input type="date" value={essaiFin} onChange={(e) => setEssaiFin(e.target.value)} className="mt-1" /></label>
+            {seasonal && <label className="block"><span className="text-caption font-medium">Libellé saison</span><Input value={saisonLabel} onChange={(e) => setSaisonLabel(e.target.value)} placeholder="Saison fraises 2026" className="mt-1" /></label>}
+            {editMode && (
+              <label className="block"><span className="text-caption font-medium">Statut</span>
+                <select value={statut} onChange={(e) => setStatut(e.target.value)} className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-body">
+                  <option value="actif">actif</option>
+                  <option value="termine">terminé</option>
+                  <option value="brouillon">brouillon</option>
+                </select>
+              </label>
+            )}
+          </div>
+          {openEnded && <p className="text-[11px] text-muted-foreground">{type} = durée indéterminée : aucune date de fin (elle n&apos;apparaîtra qu&apos;à la fin de contrat).</p>}
+          {!editMode && (
+            <label className="flex items-center gap-2 text-caption text-foreground">
+              <input type="checkbox" checked={cloturer} onChange={(e) => setCloturer(e.target.checked)} />
+              Clôturer le(s) contrat(s) actif(s) précédent(s)
+            </label>
+          )}
+          <div className="flex items-center gap-2 pt-1">
+            {editMode && onDelete && (
+              <Button variant="outline" size="xl" onClick={onDelete} disabled={saving} className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
+            )}
+            <Button variant="outline" size="xl" onClick={onClose} disabled={saving} className="flex-1">Annuler</Button>
+            <Button size="xl" onClick={submit} disabled={saving} className="flex-1">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editMode ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />} {editMode ? "Enregistrer" : "Ajouter"}</Button>
           </div>
         </div>
       </DialogContent>
