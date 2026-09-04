@@ -22,8 +22,8 @@ export async function GET() {
   const from = new Date(now.getFullYear(), now.getMonth() - 11, 1); // 12 mois glissants
 
   const [employees, activeContracts, hires, departs, leaves] = await Promise.all([
-    prisma.employee.findMany({ select: { statutEmploi: true, hireDate: true, exitDate: true } }),
-    prisma.contract.findMany({ where: { statut: "actif" }, select: { type: true } }),
+    prisma.employee.findMany({ select: { id: true, statutEmploi: true, hireDate: true, exitDate: true } }),
+    prisma.contract.findMany({ where: { statut: "actif" }, select: { type: true, employeeId: true } }),
     prisma.rhEvent.findMany({ where: { type: "embauche", date: { gte: from } }, select: { date: true } }),
     prisma.rhEvent.findMany({ where: { type: "depart", date: { gte: from } }, select: { date: true } }),
     prisma.rhLeaveRequest.findMany({ where: { statut: "approved", startDate: { gte: from } }, select: { jours: true, type: true } }),
@@ -48,8 +48,10 @@ export async function GET() {
   const effectifMoyen = Math.max(1, (actifs.length + (actifs.length + nbSorties - nbEntrees)) / 2);
   const turnoverPct = Math.round((nbSorties / effectifMoyen) * 1000) / 10;
 
-  // Ancienneté moyenne (années) sur les actifs qui ont une date d'entrée.
-  const withHire = actifs.filter((e) => e.hireDate);
+  // Ancienneté moyenne (années) sur les actifs qui ont une date d'entrée — HORS
+  // administrateur/mandataire (présent depuis la création, fausserait la moyenne salariés).
+  const adminIds = new Set(activeContracts.filter((c) => c.type === "ADMINISTRATEUR").map((c) => c.employeeId));
+  const withHire = actifs.filter((e) => e.hireDate && !adminIds.has(e.id));
   const ancienneteMoy = withHire.length
     ? Math.round((withHire.reduce((s, e) => s + (now.getTime() - new Date(e.hireDate!).getTime()), 0) / withHire.length / (365.25 * 86400_000)) * 10) / 10
     : null;
