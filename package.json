@@ -18,6 +18,7 @@
     "test:watch": "TZ=Europe/Paris vitest"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.123.0",
     "@auth/prisma-adapter": "^2.7.2",
     "@hookform/resolvers": "^3.9.1",
     "@microsoft/microsoft-graph-client": "^3.0.7",

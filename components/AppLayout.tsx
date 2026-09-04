@@ -8,6 +8,7 @@ import { RolePreviewProvider } from "@/components/role-preview/RolePreviewProvid
 import { RolePreviewBanner } from "@/components/role-preview/RolePreviewBanner";
 import { HoursValidationGate } from "@/components/effectifs/HoursValidationGate";
 import { ScrollProgress } from "@/components/core/scroll-progress";
+import { AssistantWidget } from "@/components/assistant/AssistantWidget";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -58,6 +59,8 @@ export async function AppLayout({ children }: AppLayoutProps) {
               espaceur de flux pour que le bas du contenu ne soit jamais couvert. */}
           {!terrainConfined && <TabBar />}
         </main>
+        {/* Assistant d'aide IA — bulle flottante (bas-droite), écrans desktop. */}
+        <AssistantWidget />
       </div>
     </RolePreviewProvider>
   );
