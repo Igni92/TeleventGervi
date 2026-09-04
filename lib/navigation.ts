@@ -3,7 +3,7 @@ import {
   Home, Radio, Users, Target, Truck, FileText, Package, Boxes,
   ClipboardCheck, Factory, Building2, PackageCheck, PackagePlus,
   LayoutDashboard, Trophy, Receipt, Archive, CalendarDays,
-  Wallet, Settings, Fingerprint, FileSignature, Palmtree, Clock,
+  Wallet, Settings, Fingerprint, FileSignature, Palmtree, Clock, Gauge,
 } from "lucide-react";
 
 /**
@@ -111,6 +111,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/rh/analytics", label: "Turnover & analytics", icon: Trophy },
       { href: "/rh/heures", label: "Heures & pointages", icon: Clock },
       { href: "/rh/planning", label: "Planning", icon: CalendarDays },
+      { href: "/rh/annualisation", label: "Annualisation 1600 h", icon: Gauge },
       { href: "/rh/paie", label: "Paie & éléments de salaires", icon: Wallet },
     ],
   },

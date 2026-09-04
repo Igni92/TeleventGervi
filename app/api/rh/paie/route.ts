@@ -4,6 +4,8 @@ import { requireAdmin } from "@/lib/permissions";
 import { isRhV2Enabled } from "@/lib/rh/flag";
 import { isBadgeuseEnabled } from "@/lib/rh/settings";
 import { parseSchedule, plannedNetForDate } from "@/lib/rh/schedule";
+import { isTreiziemeMonth, prorata13e } from "@/lib/salaires";
+import { gatherAnnual } from "@/lib/rh/annualAggregate";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -33,11 +35,11 @@ export async function GET(req: NextRequest) {
 
   const [badgeuse, employees, clocks, elements, sends, contracts, holidays, leaves] = await Promise.all([
     isBadgeuseEnabled(),
-    prisma.employee.findMany({ where: { statutEmploi: "actif" }, orderBy: [{ displayName: "asc" }, { email: "asc" }], select: { id: true, displayName: true, email: true, poste: true } }),
+    prisma.employee.findMany({ where: { statutEmploi: "actif" }, orderBy: [{ displayName: "asc" }, { email: "asc" }], select: { id: true, displayName: true, email: true, poste: true, hireDate: true } }),
     prisma.rhTimeClock.findMany({ where: { date: { gte: start, lt: end } }, select: { employeeId: true, heuresMin: true } }),
     prisma.rhPayrollElement.findMany({ where: { mois }, orderBy: { createdAt: "asc" }, select: { id: true, employeeId: true, type: true, label: true, montant: true, statut: true } }),
     prisma.rhPayrollSend.findMany({ where: { mois }, orderBy: { sentAt: "desc" }, take: 5 }),
-    prisma.contract.findMany({ where: { statut: "actif" }, select: { employeeId: true, heuresHebdo: true, horairesJson: true } }),
+    prisma.contract.findMany({ where: { statut: "actif" }, select: { employeeId: true, heuresHebdo: true, horairesJson: true, tauxHoraire: true } }),
     prisma.rhHoliday.findMany({ where: { date: { gte: start, lt: end } }, select: { date: true } }),
     prisma.rhLeaveRequest.findMany({ where: { statut: "approved", startDate: { lt: end }, endDate: { gte: start } }, select: { employeeId: true, startDate: true, endDate: true } }),
   ]);
@@ -81,7 +83,41 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  return NextResponse.json({ ok: true, mois, types: ELEMENT_TYPES, rows, sends });
+  // ── Suggestions d'éléments (non persistées) : demi-13e (juin/déc) + régularisation
+  //    annualisation (décembre). Le gérant les ajoute d'un clic.
+  const ctById = new Map(contracts.map((c) => [c.employeeId, c]));
+  const suggestions: Record<string, { type: string; label: string; montant: number }[]> = {};
+  const push = (empId: string, s: { type: string; label: string; montant: number }) => { (suggestions[empId] = suggestions[empId] ?? []).push(s); };
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+
+  if (isTreiziemeMonth(mois)) {
+    const semestre = mois.endsWith("-06") ? "juin" : "décembre";
+    for (const emp of employees) {
+      const ct = ctById.get(emp.id); if (!ct?.tauxHoraire) continue;
+      const prorata = prorata13e(emp.hireDate ? new Date(emp.hireDate).toISOString().slice(0, 10) : null, mois) ?? 1;
+      if (prorata <= 0) continue;
+      const baseMensuelle = ct.tauxHoraire * ct.heuresHebdo * 52 / 12;
+      const montant = round2((baseMensuelle / 2) * prorata);
+      if (montant > 0) push(emp.id, { type: "treizieme", label: `½ 13e mois (${semestre}${prorata < 1 ? `, prorata ${Math.round(prorata * 100)}%` : ""})`, montant });
+    }
+  }
+
+  if (mois.endsWith("-12")) {
+    // Régularisation annuelle de l'annualisation : les heures supp de l'année,
+    // majorées +25 %, à régler en fin de période.
+    try {
+      const board = await gatherAnnual(Number(mois.slice(0, 4)));
+      for (const r of board.rows) {
+        if (r.result.heuresSuppAnnee <= 0) continue;
+        const ct = ctById.get(r.employeeId);
+        const taux = ct?.tauxHoraire ?? 0;
+        const montant = round2(r.result.heuresSuppAnnee * taux * 1.25);
+        push(r.employeeId, { type: "autre", label: `Régularisation annualisation — ${r.result.heuresSuppAnnee} h supp (+25 %)`, montant });
+      }
+    } catch { /* annualisation indispo → pas de suggestion */ }
+  }
+
+  return NextResponse.json({ ok: true, mois, types: ELEMENT_TYPES, rows, sends, suggestions });
 }
 
 /** POST /api/rh/paie — actions : add (élément) · delete · send (recap compta). */

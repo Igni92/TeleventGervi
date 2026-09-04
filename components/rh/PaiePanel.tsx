@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 type El = { id: string; employeeId: string; type: string; label: string | null; montant: number; statut: string };
+type Sugg = { type: string; label: string; montant: number };
 type Row = { employeeId: string; name: string; poste: string | null; workedMin: number; elements: El[]; elementsTotal: number };
-type Data = { mois: string; types: string[]; rows: Row[]; sends: { id: string; sentAt: string; sentBy: string | null }[] };
+type Data = { mois: string; types: string[]; rows: Row[]; sends: { id: string; sentAt: string; sentBy: string | null }[]; suggestions?: Record<string, Sugg[]> };
 
 const TYPE_LABEL: Record<string, string> = {
   prime: "Prime", frais: "Frais", treizieme: "13e mois", vehicule_an: "Avantage véhicule", recup_paye: "Récup payée", commission: "Commission", autre: "Autre",
@@ -53,6 +54,13 @@ export function PaiePanel({ initialMonth }: { initialMonth: string }) {
   const delElement = async (id: string) => {
     await fetch("/api/rh/paie", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", id }) });
     load(mois);
+  };
+  const addSuggestion = async (employeeId: string, s: Sugg) => {
+    const r = await fetch("/api/rh/paie", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add", employeeId, mois, type: s.type, label: s.label, montant: s.montant }) });
+    const j = await r.json();
+    if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
+    toast.success("Élément ajouté"); load(mois);
   };
   const sendRecap = async () => {
     if (!confirm(`Marquer les éléments de ${monthLabel(mois)} comme envoyés à la compta ?`)) return;
@@ -111,6 +119,19 @@ export function PaiePanel({ initialMonth }: { initialMonth: string }) {
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {/* Suggestions automatiques (demi-13e, régularisation annualisation) */}
+              {(data.suggestions?.[r.employeeId] ?? []).filter((s) => !r.elements.some((e) => e.label === s.label)).length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-2">
+                  <span className="text-[11px] text-muted-foreground">Suggéré :</span>
+                  {(data.suggestions?.[r.employeeId] ?? []).filter((s) => !r.elements.some((e) => e.label === s.label)).map((s, k) => (
+                    <button key={k} type="button" onClick={() => addSuggestion(r.employeeId, s)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-brand-500/40 bg-brand-500/[0.06] px-2 py-1 text-[11.5px] text-foreground hover:bg-brand-500/12">
+                      <Plus className="h-3 w-3" /> {s.label} · {eur(s.montant)}
+                    </button>
+                  ))}
+                </div>
               )}
 
               {addFor === r.employeeId && (
