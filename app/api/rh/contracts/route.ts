@@ -7,6 +7,8 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 const CONTRACT_TYPES = ["CDI", "CDD", "SAISONNIER", "APPRENTISSAGE", "INTERIM", "STAGE", "ADMINISTRATEUR"];
+/** Contrats SANS date de fin (durée indéterminée) — juridiquement pas d'échéance. */
+const OPEN_ENDED_TYPES = new Set(["CDI", "ADMINISTRATEUR"]);
 
 async function guard() {
   if (!isRhV2Enabled()) return { err: NextResponse.json({ error: "Module RH V2 désactivé" }, { status: 404 }) };
@@ -52,7 +54,10 @@ export async function POST(req: NextRequest) {
   const emp = await prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true } });
   if (!emp) return NextResponse.json({ error: "Salarié introuvable" }, { status: 404 });
 
-  const dateFin = b.dateFin ? new Date(String(b.dateFin)) : null;
+  // CDI / ADMINISTRATEUR : durée indéterminée → JAMAIS de date de fin à la création.
+  // La fin n'apparaît que lors d'une fin de contrat (action départ), quel qu'en soit le motif.
+  const openEnded = OPEN_ENDED_TYPES.has(type);
+  const dateFin = openEnded ? null : (b.dateFin ? new Date(String(b.dateFin)) : null);
   const essaiFin = b.essaiFin ? new Date(String(b.essaiFin)) : null;
 
   const created = await prisma.$transaction(async (tx) => {

@@ -192,6 +192,15 @@ async function main() {
   //    fiche salarié affiche l'historique. Idempotent (id déterministe).
   const allEmps = await prisma.employee.findMany({ select: { id: true, hireDate: true, contracts: { select: { id: true, type: true, dateDebut: true } }, leaves: { select: { id: true, type: true, startDate: true, endDate: true, jours: true } } } });
   for (const e of allEmps) {
+    // Règle : la date d'ENTRÉE = date du PREMIER contrat (elles sont identiques).
+    const firstContract = e.contracts.map((c) => c.dateDebut).sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
+    if (!DRY && firstContract) {
+      const wantHire = firstContract.getTime();
+      if (!e.hireDate || e.hireDate.getTime() !== wantHire) {
+        await prisma.employee.update({ where: { id: e.id }, data: { hireDate: firstContract } });
+        e.hireDate = firstContract;
+      }
+    }
     if (!DRY && e.hireDate) {
       await prisma.rhEvent.upsert({ where: { id: `kvevt_hire_${e.id}`.slice(0, 190) }, create: { id: `kvevt_hire_${e.id}`.slice(0, 190), employeeId: e.id, type: "embauche", date: e.hireDate }, update: {} });
       bump("events");

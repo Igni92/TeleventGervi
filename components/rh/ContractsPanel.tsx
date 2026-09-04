@@ -138,6 +138,7 @@ function ContractDialog({ mode, emp, types, onClose, onSaved }: {
   const [essaiFin, setEssaiFin] = useState("");
   const [heuresHebdo, setHeuresHebdo] = useState("35");
   const [saisonLabel, setSaisonLabel] = useState("");
+  const openEnded = type === "CDI" || type === "ADMINISTRATEUR"; // durée indéterminée → pas de fin
   const seasonal = type === "CDD" || type === "SAISONNIER";
 
   const submit = async () => {
@@ -196,7 +197,9 @@ function ContractDialog({ mode, emp, types, onClose, onSaved }: {
           </div>
           <div className="grid grid-cols-2 gap-2">
             <Field label="Début"><Input type="date" value={dateDebut} onChange={(e) => setDateDebut(e.target.value)} /></Field>
-            <Field label={seasonal ? "Fin (CDD/saison)" : "Fin (option)"}><Input type="date" value={dateFin} onChange={(e) => setDateFin(e.target.value)} /></Field>
+            {openEnded
+              ? <div className="flex items-end pb-1 text-[11px] text-muted-foreground">Durée indéterminée — pas de date de fin.</div>
+              : <Field label={seasonal ? "Fin (CDD/saison)" : "Fin"}><Input type="date" value={dateFin} onChange={(e) => setDateFin(e.target.value)} /></Field>}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <Field label="Fin période d'essai"><Input type="date" value={essaiFin} onChange={(e) => setEssaiFin(e.target.value)} /></Field>

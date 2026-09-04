@@ -28,6 +28,8 @@ const EVENT_META: Record<string, { label: string; icon: React.ReactNode; cls: st
 };
 const DOC_LABEL: Record<string, string> = { contrat: "Contrat", bulletin: "Bulletin", attestation: "Attestation", justificatif: "Justificatif", autre: "Autre" };
 const CONTRACT_TYPES = ["CDI", "CDD", "SAISONNIER", "APPRENTISSAGE", "INTERIM", "STAGE", "ADMINISTRATEUR"];
+/** Contrats à durée indéterminée : aucune date de fin (juridiquement) — sauf fin de contrat. */
+const OPEN_ENDED = new Set(["CDI", "ADMINISTRATEUR"]);
 
 function metaText(e: Event): string | null {
   if (!e.meta) return null;
@@ -56,6 +58,8 @@ export function EmployeeFiche({ id }: { id: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploadType, setUploadType] = useState("contrat");
   const [editCt, setEditCt] = useState<string | null>(null);
+  const [editType, setEditType] = useState<string | null>(null);
+  const [addCt, setAddCt] = useState(false);
   const editVals = useRef<Record<string, unknown>>({});
 
   const load = useCallback(async () => {
@@ -83,7 +87,15 @@ export function EmployeeFiche({ id }: { id: string }) {
     const r = await fetch(`/api/rh/contracts/${cid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(v) });
     const j = await r.json();
     if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
-    toast.success("Contrat mis à jour"); setEditCt(null); editVals.current = {}; load();
+    toast.success("Contrat mis à jour"); setEditCt(null); setEditType(null); editVals.current = {}; load();
+  };
+
+  const deleteContract = async (cid: string) => {
+    if (!confirm("Supprimer ce contrat ? (correction — action définitive)")) return;
+    const r = await fetch(`/api/rh/contracts/${cid}`, { method: "DELETE" });
+    const j = await r.json();
+    if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
+    toast.success("Contrat supprimé"); setEditCt(null); load();
   };
 
   const saveHire = async () => {
@@ -157,21 +169,29 @@ export function EmployeeFiche({ id }: { id: string }) {
         </div>
       </div>
 
-      {/* Contrats — type & heures éditables (direction) */}
+      {/* Contrats — éditables (type, dates, heures) + ajout/suppression (correction direction) */}
       <section>
-        <h3 className="text-[13px] font-semibold text-foreground mb-2">Contrats</h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[13px] font-semibold text-foreground">Contrats</h3>
+          <Button size="sm" variant="outline" onClick={() => setAddCt(true)}><Plus className="h-3.5 w-3.5" /> Ajouter</Button>
+        </div>
         <ul className="space-y-1.5">
-          {emp.contracts.map((c) => (
+          {emp.contracts.map((c) => {
+            const editing = editCt === c.id;
+            const editOpenEnded = OPEN_ENDED.has((editType ?? c.type));
+            return (
             <li key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-[13px]">
-              {editCt === c.id ? (
+              {editing ? (
                 <div className="flex items-center gap-2 flex-wrap flex-1">
-                  <select defaultValue={c.type} onChange={(e) => (editVals.current.type = e.target.value)} className="h-8 rounded-md border border-input bg-background px-2 text-body">
+                  <select defaultValue={c.type} onChange={(e) => { editVals.current.type = e.target.value; setEditType(e.target.value); }} className="h-8 rounded-md border border-input bg-background px-2 text-body">
                     {CONTRACT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                   <Input type="number" defaultValue={c.heuresHebdo} onChange={(e) => (editVals.current.heuresHebdo = Number(e.target.value))} className="h-8 w-20" title="Heures/sem" />
-                  <Input type="date" defaultValue={dISO(c.dateFin)} onChange={(e) => (editVals.current.dateFin = e.target.value)} className="h-8 w-40" title="Fin (option)" />
+                  <Input type="date" defaultValue={dISO(c.dateDebut)} onChange={(e) => (editVals.current.dateDebut = e.target.value)} className="h-8 w-40" title="Début" />
+                  {!editOpenEnded && <Input type="date" defaultValue={dISO(c.dateFin)} onChange={(e) => (editVals.current.dateFin = e.target.value)} className="h-8 w-40" title="Fin (CDD/saison)" />}
                   <Button size="sm" onClick={() => patchContract(c.id)}><Check className="h-3.5 w-3.5" /></Button>
-                  <button type="button" onClick={() => setEditCt(null)} className="text-[11px] text-muted-foreground hover:text-foreground">Annuler</button>
+                  <button type="button" onClick={() => { setEditCt(null); setEditType(null); }} className="text-[11px] text-muted-foreground hover:text-foreground">Annuler</button>
+                  <button type="button" onClick={() => deleteContract(c.id)} title="Supprimer ce contrat" className="text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               ) : (
                 <>
@@ -179,12 +199,13 @@ export function EmployeeFiche({ id }: { id: string }) {
                   <span className="flex items-center gap-2 text-muted-foreground tnum">
                     {fmt(c.dateDebut)}{c.dateFin ? ` → ${fmt(c.dateFin)}` : ""}
                     <span className={`rounded px-1.5 py-0.5 text-[11px] ${c.statut === "actif" ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300" : "bg-secondary text-muted-foreground"}`}>{c.statut}</span>
-                    <button type="button" onClick={() => { setEditCt(c.id); editVals.current = {}; }} title="Modifier le contrat" className="text-muted-foreground hover:text-primary"><Pencil className="h-3 w-3" /></button>
+                    <button type="button" onClick={() => { setEditCt(c.id); setEditType(c.type); editVals.current = {}; }} title="Modifier le contrat" className="text-muted-foreground hover:text-primary"><Pencil className="h-3 w-3" /></button>
                   </span>
                 </>
               )}
             </li>
-          ))}
+            );
+          })}
           {emp.contracts.length === 0 && <li className="text-[13px] text-muted-foreground">Aucun contrat.</li>}
         </ul>
       </section>
@@ -250,7 +271,60 @@ export function EmployeeFiche({ id }: { id: string }) {
       </section>
 
       {departOpen && <DepartDialog onClose={() => setDepartOpen(false)} onConfirm={async (exitDate, exitReason) => { if (await action({ action: "depart", exitDate, exitReason }, "Fin de contrat enregistrée")) setDepartOpen(false); }} />}
+      {addCt && <AddContractDialog employeeId={id} onClose={() => setAddCt(false)} onSaved={() => { setAddCt(false); load(); }} />}
     </div>
+  );
+}
+
+/** Ajout d'un contrat sur la fiche (correction / renouvellement). `cloturerPrecedents`
+ *  optionnel : décoché = correction (garde les autres contrats tels quels). */
+function AddContractDialog({ employeeId, onClose, onSaved }: { employeeId: string; onClose: () => void; onSaved: () => void }) {
+  const [type, setType] = useState("CDI");
+  const [dateDebut, setDateDebut] = useState(new Date().toISOString().slice(0, 10));
+  const [dateFin, setDateFin] = useState("");
+  const [heuresHebdo, setHeuresHebdo] = useState("35");
+  const [cloturer, setCloturer] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const openEnded = OPEN_ENDED.has(type);
+  const submit = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch("/api/rh/contracts", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employeeId, type, dateDebut, dateFin: openEnded ? undefined : (dateFin || undefined), heuresHebdo: Number(heuresHebdo) || 35, cloturerPrecedents: cloturer }) });
+      const j = await r.json();
+      if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
+      toast.success("Contrat ajouté"); onSaved();
+    } finally { setSaving(false); }
+  };
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o && !saving) onClose(); }}>
+      <DialogContent size="sm">
+        <DialogHeader className="text-left"><DialogTitle className="flex items-center gap-2"><FileSignature className="h-5 w-5" /> Ajouter un contrat</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block"><span className="text-caption font-medium">Type</span>
+              <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-body">
+                {CONTRACT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+            <label className="block"><span className="text-caption font-medium">Heures/sem</span><Input type="number" value={heuresHebdo} onChange={(e) => setHeuresHebdo(e.target.value)} className="mt-1" /></label>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block"><span className="text-caption font-medium">Début</span><Input type="date" value={dateDebut} onChange={(e) => setDateDebut(e.target.value)} className="mt-1" /></label>
+            {!openEnded && <label className="block"><span className="text-caption font-medium">Fin (CDD/saison)</span><Input type="date" value={dateFin} onChange={(e) => setDateFin(e.target.value)} className="mt-1" /></label>}
+          </div>
+          {openEnded && <p className="text-[11px] text-muted-foreground">{type} = durée indéterminée : aucune date de fin (elle n'apparaîtra qu'à la fin de contrat).</p>}
+          <label className="flex items-center gap-2 text-caption text-foreground">
+            <input type="checkbox" checked={cloturer} onChange={(e) => setCloturer(e.target.checked)} />
+            Clôturer le(s) contrat(s) actif(s) précédent(s)
+          </label>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <Button variant="outline" size="xl" onClick={onClose} disabled={saving}>Annuler</Button>
+            <Button size="xl" onClick={submit} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Ajouter</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
