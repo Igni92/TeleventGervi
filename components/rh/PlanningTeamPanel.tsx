@@ -1,8 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Loader2, ChevronLeft, ChevronRight, CalendarRange } from "lucide-react";
 import { fmtHM } from "@/lib/rh/time";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type Day = { plannedMin: number; actualMin: number; min: number; tag: string | null };
 type Row = { employeeId: string; name: string; poste: string | null; days: Day[] };
@@ -24,6 +28,7 @@ export function PlanningTeamPanel({ initialWeek }: { initialWeek: string }) {
   const [iso, setIso] = useState(initialWeek);
   const [data, setData] = useState<Week | null>(null);
   const [loading, setLoading] = useState(true);
+  const [edit, setEdit] = useState<{ employeeId: string; name: string; dayIndex: number; date: string } | null>(null);
 
   const load = useCallback(async (w: string) => {
     setLoading(true);
@@ -87,9 +92,10 @@ export function PlanningTeamPanel({ initialWeek }: { initialWeek: string }) {
                     const showPlanned = d.tag === "present" && d.plannedMin > 0 && d.plannedMin !== d.actualMin;
                     return (
                       <td key={i} className="px-1.5 py-1.5 text-center align-top">
-                        <span className={`inline-block min-w-[52px] rounded-md px-2 py-1 text-[11.5px] font-medium ${c.cls}`} title={showPlanned ? `Prévu ${fmtHM(d.plannedMin)} · pointé ${fmtHM(d.actualMin)}` : c.label}>
+                        <button type="button" onClick={() => setEdit({ employeeId: r.employeeId, name: r.name, dayIndex: i, date: data.days[i] })}
+                          className={`inline-block min-w-[52px] rounded-md px-2 py-1 text-[11.5px] font-medium hover:ring-1 hover:ring-brand-500/50 transition ${c.cls}`} title={showPlanned ? `Prévu ${fmtHM(d.plannedMin)} · pointé ${fmtHM(d.actualMin)} — cliquer pour modifier` : "Cliquer pour modifier"}>
                           {d.tag === "present" ? fmtHM(d.actualMin || d.min) : c.label === "—" ? "—" : c.label}
-                        </span>
+                        </button>
                         {showPlanned && <span className="block text-[9px] text-muted-foreground mt-0.5">prévu {fmtHM(d.plannedMin)}</span>}
                       </td>
                     );
@@ -102,12 +108,72 @@ export function PlanningTeamPanel({ initialWeek }: { initialWeek: string }) {
       )}
 
       {/* Légende */}
-      <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
         {Object.entries(CELL).filter(([k]) => k !== "absent").map(([k, c]) => (
           <span key={k} className="inline-flex items-center gap-1.5"><span className={`h-3 w-3 rounded ${c.cls}`} /> {c.label}</span>
         ))}
+        <span className="ml-auto">Cliquez une case pour modifier le planning.</span>
       </div>
+
+      {edit && <DayEditor edit={edit} iso={iso} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(iso); }} />}
     </div>
+  );
+}
+
+/** Édition manuelle d'un jour de planning (direction) → RhWeekSheet.days. */
+function DayEditor({ edit, iso, onClose, onSaved }: { edit: { employeeId: string; name: string; dayIndex: number; date: string }; iso: string; onClose: () => void; onSaved: () => void }) {
+  const [mode, setMode] = useState<"present" | "conges" | "recup" | "maladie" | "absent">("present");
+  const [hours, setHours] = useState("7:00");
+  const [saving, setSaving] = useState(false);
+
+  const post = async (body: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      const r = await fetch("/api/rh/planning/day", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employeeId: edit.employeeId, isoWeek: iso, dayIndex: edit.dayIndex, ...body }) });
+      const j = await r.json();
+      if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
+      toast.success("Planning mis à jour"); onSaved();
+    } finally { setSaving(false); }
+  };
+  const save = () => {
+    if (mode === "present") {
+      const m = /^(\d{1,2})[:hH.,]?(\d{0,2})$/.exec(hours.trim());
+      const min = m ? Number(m[1]) * 60 + (m[2] ? Number(m[2]) : 0) : NaN;
+      if (!Number.isFinite(min) || min < 0) { toast.error("Heures invalides (ex. 7:00)"); return; }
+      post({ tag: "present", min });
+    } else post({ tag: mode });
+  };
+
+  const d = new Date(edit.date + "T00:00:00Z").toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "long", timeZone: "UTC" });
+  const MODES: { v: typeof mode; label: string }[] = [
+    { v: "present", label: "Présent" }, { v: "conges", label: "Congé" }, { v: "recup", label: "Récup" }, { v: "maladie", label: "Maladie" }, { v: "absent", label: "Absent" },
+  ];
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o && !saving) onClose(); }}>
+      <DialogContent size="sm">
+        <DialogHeader className="text-left"><DialogTitle>{edit.name}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <p className="text-[13px] text-muted-foreground capitalize">{d}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {MODES.map((m) => (
+              <button key={m.v} type="button" onClick={() => setMode(m.v)}
+                className={`h-8 rounded-lg px-3 text-caption font-medium ring-1 ${mode === m.v ? "bg-brand-500 text-black ring-brand-500" : "bg-background text-foreground ring-border hover:bg-secondary"}`}>{m.label}</button>
+            ))}
+          </div>
+          {mode === "present" && (
+            <label className="block"><span className="text-caption font-medium">Heures travaillées</span>
+              <Input value={hours} onChange={(e) => setHours(e.target.value)} placeholder="7:00" className="mt-1 w-32" />
+            </label>
+          )}
+          <div className="flex items-center gap-2 pt-1">
+            <Button variant="outline" size="xl" onClick={() => post({ clear: true })} disabled={saving} title="Revenir au calcul automatique">Auto</Button>
+            <Button variant="outline" size="xl" onClick={onClose} disabled={saving} className="flex-1">Annuler</Button>
+            <Button size="xl" onClick={save} disabled={saving} className="flex-1">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Enregistrer"}</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

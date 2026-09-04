@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, LogOut, RotateCcw, StickyNote, FileSignature, UserCheck, Plane, Plus, CalendarDays, Pencil, Check, Upload, Download, Trash2, FileText, Lock, Paperclip } from "lucide-react";
+import { Loader2, LogOut, RotateCcw, StickyNote, FileSignature, UserCheck, Plane, Plus, CalendarDays, Pencil, Check, Upload, Download, Trash2, FileText, Lock, Paperclip, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ScheduleDialog } from "@/components/rh/ScheduleDialog";
 
-type Contract = { id: string; type: string; statut: string; dateDebut: string; dateFin: string | null; essaiFin: string | null; heuresHebdo: number; saisonLabel: string | null };
+type Contract = { id: string; type: string; statut: string; dateDebut: string; dateFin: string | null; essaiFin: string | null; heuresHebdo: number; saisonLabel: string | null; horairesJson?: string | null };
 type Event = { id: string; type: string; date: string; meta: string | null; createdBy: string | null };
 type Doc = { id: string; type: string; nom: string; mime: string | null; visibleSalarie: boolean; createdAt: string; uploadedBy: string | null; contractId: string | null };
 type Emp = {
@@ -59,6 +60,7 @@ export function EmployeeFiche({ id }: { id: string }) {
   const [uploadType, setUploadType] = useState("contrat");
   const [addCt, setAddCt] = useState(false);
   const [editContract, setEditContract] = useState<Contract | null>(null);
+  const [schedContract, setSchedContract] = useState<Contract | null>(null);
   // Cible de l'upload en cours : coffre-fort général (contractId null) ou contrat précis.
   const pendingUpload = useRef<{ contractId: string | null; type: string }>({ contractId: null, type: "contrat" });
 
@@ -179,6 +181,7 @@ export function EmployeeFiche({ id }: { id: string }) {
                 <span className="flex items-center gap-2 text-muted-foreground tnum">
                   {fmt(c.dateDebut)}{c.dateFin ? ` → ${fmt(c.dateFin)}` : ""}
                   <span className={`rounded px-1.5 py-0.5 text-[11px] ${c.statut === "actif" ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300" : "bg-secondary text-muted-foreground"}`}>{c.statut}</span>
+                  <button type="button" onClick={() => setSchedContract(c)} title="Horaires & modulation" className="text-muted-foreground hover:text-primary"><Clock className="h-3.5 w-3.5" /></button>
                   <button type="button" onClick={() => pickFile(c.id, "contrat")} title="Rattacher un document à ce contrat" className="text-muted-foreground hover:text-primary"><Paperclip className="h-3.5 w-3.5" /></button>
                   <button type="button" onClick={() => setEditContract(c)} title="Modifier le contrat" className="text-muted-foreground hover:text-primary"><Pencil className="h-3 w-3" /></button>
                 </span>
@@ -270,6 +273,7 @@ export function EmployeeFiche({ id }: { id: string }) {
       {departOpen && <DepartDialog onClose={() => setDepartOpen(false)} onConfirm={async (exitDate, exitReason) => { if (await action({ action: "depart", exitDate, exitReason }, "Fin de contrat enregistrée")) setDepartOpen(false); }} />}
       {addCt && <ContractDialog employeeId={id} onClose={() => setAddCt(false)} onSaved={() => { setAddCt(false); load(); }} />}
       {editContract && <ContractDialog employeeId={id} contract={editContract} onClose={() => setEditContract(null)} onSaved={() => { setEditContract(null); load(); }} onDelete={() => deleteContract(editContract.id)} />}
+      {schedContract && <ScheduleDialog contract={schedContract} onClose={() => setSchedContract(null)} onSaved={() => { setSchedContract(null); load(); }} />}
     </div>
   );
 }

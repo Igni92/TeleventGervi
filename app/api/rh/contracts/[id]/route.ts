@@ -33,6 +33,11 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   if ("heuresAnnuelles" in b && typeof b.heuresAnnuelles === "number") data.heuresAnnuelles = b.heuresAnnuelles;
   if ("classification" in b) data.classification = b.classification ? String(b.classification) : null;
   if ("saisonLabel" in b) data.saisonLabel = b.saisonLabel ? String(b.saisonLabel) : null;
+  if ("horairesJson" in b) {
+    // Horaires/modulation : stocke le JSON tel quel (validé côté UI) ou null pour repli défaut.
+    if (b.horairesJson == null || b.horairesJson === "") data.horairesJson = null;
+    else { try { JSON.parse(String(b.horairesJson)); data.horairesJson = String(b.horairesJson); } catch { return NextResponse.json({ error: "horairesJson invalide" }, { status: 400 }); } }
+  }
   for (const k of ["dateDebut", "dateFin", "essaiFin"] as const) {
     if (k in b) {
       if (!b[k]) { data[k] = null; continue; }
