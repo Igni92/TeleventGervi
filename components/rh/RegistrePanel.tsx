@@ -26,6 +26,7 @@ export function RegistrePanel() {
   const [s, setS] = useState<State | null>(null);
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState<null | { mode: "hire" | "contract"; emp?: Member }>(null);
+  const [showSortis, setShowSortis] = useState(false); // sortis masqués par défaut
 
   const load = useCallback(async () => {
     try {
@@ -42,6 +43,9 @@ export function RegistrePanel() {
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
   if (!s) return <p className="text-center text-muted-foreground py-16">Registre indisponible.</p>;
+
+  const sortisCount = s.team.filter((m) => m.statutEmploi === "sorti").length;
+  const visibleTeam = showSortis ? s.team : s.team.filter((m) => m.statutEmploi !== "sorti");
 
   return (
     <div className="space-y-6">
@@ -68,11 +72,19 @@ export function RegistrePanel() {
         </div>
       )}
 
-      {/* Registre — LISTE UNIQUE */}
+      {/* Registre — LISTE UNIQUE (sortis masqués par défaut) */}
       <div>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
           <h2 className="text-[15px] font-semibold text-foreground">Registre des salariés</h2>
-          <Button onClick={() => setDialog({ mode: "hire" })}><UserPlus className="h-4 w-4" /> Embaucher</Button>
+          <div className="flex items-center gap-2">
+            {sortisCount > 0 && (
+              <button type="button" onClick={() => setShowSortis((v) => !v)}
+                className={`h-9 rounded-lg px-3 text-caption font-medium ring-1 transition-colors ${showSortis ? "bg-secondary text-foreground ring-border" : "bg-background text-muted-foreground ring-border hover:bg-secondary"}`}>
+                {showSortis ? `Masquer les sortis (${sortisCount})` : `Voir les sortis (${sortisCount})`}
+              </button>
+            )}
+            <Button onClick={() => setDialog({ mode: "hire" })}><UserPlus className="h-4 w-4" /> Embaucher</Button>
+          </div>
         </div>
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="overflow-x-auto">
@@ -89,7 +101,7 @@ export function RegistrePanel() {
                 </tr>
               </thead>
               <tbody>
-                {s.team.map((m) => {
+                {visibleTeam.map((m) => {
                   const sorti = m.statutEmploi === "sorti";
                   const essaiIn = daysUntil(m.essaiFin);
                   const cddIn = daysUntil(m.dateFin);
@@ -127,7 +139,7 @@ export function RegistrePanel() {
                     </tr>
                   );
                 })}
-                {s.team.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Aucun salarié.</td></tr>}
+                {visibleTeam.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">{s.team.length === 0 ? "Aucun salarié." : "Aucun salarié actif — voir les sortis."}</td></tr>}
               </tbody>
             </table>
           </div>

@@ -45,8 +45,9 @@ export function SummaryStats({ totals }: { totals: Totals }) {
 /** Compteur d'onglet : la couleur d'état reste sur le CHIFFRE uniquement,
  *  discrète (jamais d'aplat) ; un compteur à zéro s'efface. */
 function Count({ n, tone }: { n: number; tone?: string }) {
+  // Nombre d'actions : espacé (+3mm) du libellé et en surgras pour lisibilité.
   return (
-    <span className={`tnum text-caption2 font-bold ${n === 0 ? "text-muted-foreground/50" : tone ?? "text-muted-foreground"}`}>
+    <span className={`ml-[3mm] tnum text-caption font-black ${n === 0 ? "text-muted-foreground/50" : tone ?? "text-muted-foreground"}`}>
       {n}
     </span>
   );
