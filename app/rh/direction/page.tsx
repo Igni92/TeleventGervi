@@ -3,14 +3,13 @@ import { redirect, notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/permissions";
 import { isRhV2Enabled } from "@/lib/rh/flag";
 import { PageHeader } from "@/components/ui/page-header";
-import { DirectionCockpit } from "@/components/rh/DirectionCockpit";
-import { ContractsPanel } from "@/components/rh/ContractsPanel";
+import { RegistrePanel } from "@/components/rh/RegistrePanel";
 
-export const metadata = { title: "Cockpit RH & contrats" };
+export const metadata = { title: "Registre des salariés" };
 export const dynamic = "force-dynamic";
 
-/** Cockpit RH direction (RH V2) — présence temps réel + gestion des contrats et
- *  saisonniers, réunis sur une seule page. Réservé admin/direction. */
+/** Registre des salariés (RH V2) — liste unique : présence temps réel + contrats +
+ *  configuration (embauche, renouvellement). Réservé admin/direction. */
 export default async function RhDirectionPage() {
   if (!isRhV2Enabled()) notFound();
   const session = await auth();
@@ -18,12 +17,8 @@ export default async function RhDirectionPage() {
   if (!(await requireAdmin(session))) redirect("/rh");
   return (
     <>
-      <PageHeader kicker="RH · Direction" title="Cockpit RH & contrats" help="Présence en temps réel (badgeuse), échéances de contrat, congés à valider — et gestion des contrats & saisonniers." />
-      <DirectionCockpit />
-      <section className="mt-8">
-        <h2 className="text-[15px] font-semibold text-foreground mb-3">Contrats & saisonniers</h2>
-        <ContractsPanel />
-      </section>
+      <PageHeader kicker="RH · Direction" title="Registre des salariés" help="Liste unique : présence en temps réel, contrats, échéances et embauche — cliquez un salarié pour tout configurer." />
+      <RegistrePanel />
     </>
   );
 }

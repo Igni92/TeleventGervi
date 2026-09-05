@@ -106,7 +106,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/rh", label: "Mon espace (badgeuse)", icon: Fingerprint },
       { href: "/rh/conges", label: "Congés & absences", icon: Palmtree },
-      { href: "/rh/direction", label: "Cockpit RH & contrats", icon: LayoutDashboard, also: ["/rh/contrats"] },
+      { href: "/rh/direction", label: "Registre des salariés", icon: Users, also: ["/rh/contrats"] },
       { href: "/rh/analytics", label: "Turnover & analytics", icon: Trophy },
       { href: "/rh/heures", label: "Heures & pointages", icon: Clock },
       { href: "/rh/planning", label: "Planning", icon: CalendarDays },

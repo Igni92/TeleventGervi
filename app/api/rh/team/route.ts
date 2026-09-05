@@ -22,27 +22,29 @@ export async function GET() {
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const in30 = new Date(now.getTime() + 30 * 86400_000);
 
-  const [employees, clocks, contractsActive, alertsRaw, pendingLeaves] = await Promise.all([
+  const [employees, clocks, contracts, pendingLeaves] = await Promise.all([
+    // Registre COMPLET : actifs + sortis (le registre liste tout le monde).
     prisma.employee.findMany({
-      where: { statutEmploi: "actif" },
-      select: { id: true, email: true, displayName: true, poste: true, service: true, hireDate: true, sapSlpName: true },
-      orderBy: [{ displayName: "asc" }, { email: "asc" }],
+      select: { id: true, email: true, displayName: true, poste: true, service: true, hireDate: true, sapSlpName: true, statutEmploi: true },
+      orderBy: [{ statutEmploi: "asc" }, { displayName: "asc" }, { email: "asc" }],
     }),
     prisma.rhTimeClock.findMany({ where: { date: today }, include: { punches: { orderBy: { at: "asc" } } } }),
-    prisma.contract.findMany({ where: { statut: "actif" }, select: { employeeId: true, type: true, heuresHebdo: true } }),
-    // Alertes : fin d'essai OU fin de CDD/saisonnier dans les 30 jours.
-    prisma.contract.findMany({
-      where: { statut: "actif", OR: [{ essaiFin: { gte: today, lte: in30 } }, { dateFin: { gte: today, lte: in30 } }] },
-      select: { employeeId: true, type: true, essaiFin: true, dateFin: true },
-    }),
+    prisma.contract.findMany({ orderBy: { dateDebut: "desc" }, select: { employeeId: true, type: true, heuresHebdo: true, statut: true, dateDebut: true, dateFin: true, essaiFin: true, saisonLabel: true } }),
     prisma.rhLeaveRequest.count({ where: { statut: "pending" } }),
   ]);
 
   const clockByEmp = new Map(clocks.map((c) => [c.employeeId, c]));
-  const contractByEmp = new Map(contractsActive.map((c) => [c.employeeId, c]));
+  // Contrat de référence par salarié = actif sinon le plus récent.
+  const contractByEmp = new Map<string, typeof contracts[number]>();
+  for (const c of contracts) {
+    const cur = contractByEmp.get(c.employeeId);
+    if (!cur || (c.statut === "actif" && cur.statut !== "actif")) contractByEmp.set(c.employeeId, c);
+  }
 
-  let presentCount = 0;
+  let presentCount = 0; let effectif = 0;
   const team = employees.map((e) => {
+    const actif = e.statutEmploi === "actif";
+    if (actif) effectif++;
     const c = clockByEmp.get(e.id);
     const punches = (c?.punches ?? []).map((p) => ({ kind: p.kind as "in" | "out", at: p.at }));
     const inside = punches[punches.length - 1]?.kind === "in";
@@ -53,27 +55,31 @@ export async function GET() {
     if (inside) presentCount++;
     const ct = contractByEmp.get(e.id);
     return {
-      id: e.id, name: e.displayName ?? e.email, poste: e.poste, service: e.service, sap: e.sapSlpName,
-      contractType: ct?.type ?? null, heuresHebdo: ct?.heuresHebdo ?? null,
-      hireDate: e.hireDate, inside, hasClocked, workedMin,
+      id: e.id, name: e.displayName ?? e.email, email: e.email, poste: e.poste, service: e.service, sap: e.sapSlpName,
+      statutEmploi: e.statutEmploi, hireDate: e.hireDate,
+      contractType: ct?.type ?? null, heuresHebdo: ct?.heuresHebdo ?? null, contractStatut: ct?.statut ?? null,
+      dateDebut: ct?.dateDebut ?? null, dateFin: ct?.dateFin ?? null, essaiFin: ct?.essaiFin ?? null, saisonLabel: ct?.saisonLabel ?? null,
+      inside, hasClocked, workedMin,
     };
   });
 
-  const alerts = alertsRaw.map((a) => {
-    const emp = employees.find((e) => e.id === a.employeeId);
-    const essai = a.essaiFin && a.essaiFin >= today && a.essaiFin <= in30;
-    return {
-      name: emp?.displayName ?? emp?.email ?? "?",
-      kind: essai ? "essai" : "cdd",
-      date: essai ? a.essaiFin : a.dateFin,
-      contractType: a.type,
-    };
-  }).filter((a) => a.date).sort((x, y) => new Date(x.date!).getTime() - new Date(y.date!).getTime());
+  // Alertes : fin d'essai OU fin de CDD/saisonnier dans les 30 jours (contrats actifs).
+  const alerts = contracts
+    .filter((c) => c.statut === "actif" && ((c.essaiFin && c.essaiFin >= today && c.essaiFin <= in30) || (c.dateFin && c.dateFin >= today && c.dateFin <= in30)))
+    .map((c) => {
+      const emp = employees.find((e) => e.id === c.employeeId);
+      const essai = c.essaiFin && c.essaiFin >= today && c.essaiFin <= in30;
+      return { name: emp?.displayName ?? emp?.email ?? "?", kind: essai ? "essai" : "cdd", date: essai ? c.essaiFin : c.dateFin, contractType: c.type };
+    })
+    .filter((a) => a.date).sort((x, y) => new Date(x.date!).getTime() - new Date(y.date!).getTime());
+
+  const CONTRACT_TYPES = ["CDI", "CDD", "SAISONNIER", "APPRENTISSAGE", "INTERIM", "STAGE", "ADMINISTRATEUR"];
 
   return NextResponse.json({
     ok: true,
-    stats: { effectif: employees.length, presents: presentCount, congesEnAttente: pendingLeaves, alertes: alerts.length },
+    stats: { effectif, presents: presentCount, congesEnAttente: pendingLeaves, alertes: alerts.length },
     team,
     alerts,
+    types: CONTRACT_TYPES,
   });
 }

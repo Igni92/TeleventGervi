@@ -123,8 +123,8 @@ function Badge({ tone, children }: { tone: "emerald" | "amber" | "rose" | "zinc"
   return <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] font-semibold ${cls}`}>{children}</span>;
 }
 
-function ContractDialog({ mode, emp, types, onClose, onSaved }: {
-  mode: "hire" | "contract"; emp?: Emp; types: string[]; onClose: () => void; onSaved: () => void;
+export function ContractDialog({ mode, emp, types, onClose, onSaved }: {
+  mode: "hire" | "contract"; emp?: { id: string; email?: string; displayName?: string | null }; types: string[]; onClose: () => void; onSaved: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   // Champs embauche
