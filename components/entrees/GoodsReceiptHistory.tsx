@@ -11,7 +11,6 @@ import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { FullscreenPanel } from "@/components/ui/fullscreen-panel";
 import { GroupedList, GroupedRow } from "@/components/ui/grouped-list";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -409,9 +408,6 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
     setDocs((cur) => cur.map((d) => (d.docEntry === docEntry ? { ...d, numAtCard } : d)));
   const hasFilters = query.trim() !== "" || dateFilter !== "";
   // Entrée affichée en grand (dérivée de docs → reflète les éditions).
-  const largeDoc = largeEntry != null ? docs.find((d) => d.docEntry === largeEntry) ?? null : null;
-  // Incident ouvert sur l'entrée agrandie → titre en rouge (alerte immédiate).
-  const largeHasIncident = largeDoc ? (byDoc.get(largeDoc.docEntry) ?? []).some((i) => !i.resolved) : false;
 
   return (
     <div className="space-y-6">
@@ -499,12 +495,13 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                   const openIncidents = (byDoc.get(d.docEntry) ?? []).filter((i) => !i.resolved);
                   const heure = heureFromDocRef(d.comments);
                   const creator = creatorFromDocRef(d.comments);
+                  const expanded = largeEntry === d.docEntry;
                   return (
+                <div key={d.docEntry} className="rounded-2xl border border-border bg-card overflow-hidden">
                 <button
-                  key={d.docEntry}
                   type="button"
-                  onClick={() => setLargeEntry(d.docEntry)}
-                  className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
+                  onClick={() => setLargeEntry(expanded ? null : d.docEntry)}
+                  className="w-full flex items-center gap-3 p-4 text-left active:bg-secondary/40"
                 >
                   <div className="min-w-0 flex-1">
                     <div className={`text-[15px] font-semibold truncate ${isVoided(d) ? "line-through text-rose-600 dark:text-rose-400" : "text-foreground"}`}>
@@ -534,9 +531,25 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                         {openIncidents.map((i) => <IncidentTypeIcon key={i.id} type={i.type} className="h-[18px] w-[18px]" />)}
                       </span>
                     )}
-                    <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
+                    <ChevronRight className={`h-5 w-5 text-muted-foreground/50 transition-transform ${expanded ? "rotate-90" : ""}`} />
                   </div>
                 </button>
+                {expanded && (
+                  <div className="border-t border-brand-500/30 px-3 py-3">
+                    <ReceiptDetail
+                      receipt={d}
+                      dlc={dlcMap[d.lot]}
+                      onDlcSaved={mergeDlc}
+                      incidents={byDoc.get(d.docEntry) ?? []}
+                      onIncidentChanged={reloadIncidents}
+                      onNumAtCardChange={updateNumAtCard}
+                      onModified={load}
+                      agreage={agreages[d.docEntry] ?? null}
+                      restricted={restricted}
+                    />
+                  </div>
+                )}
+                </div>
                   );
                 })}
               </div>
@@ -574,10 +587,10 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                       </td>
                     </tr>
                     {g.rows.map((d) => (
+                  <Fragment key={d.docEntry}>
                   <tr
-                    key={d.docEntry}
-                    className="border-t border-border cursor-pointer transition-colors hover:bg-secondary/30"
-                    onClick={() => setLargeEntry(d.docEntry)}
+                    className={`border-t border-border cursor-pointer transition-colors hover:bg-secondary/30 ${largeEntry === d.docEntry ? "bg-secondary/40" : ""}`}
+                    onClick={() => setLargeEntry(largeEntry === d.docEntry ? null : d.docEntry)}
                   >
                     <td className="px-3 py-2.5 font-mono font-semibold whitespace-nowrap">
                       {/* Annulée = ENCRE ROUGE lisible (plus de gris clair illisible). */}
@@ -626,9 +639,30 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                       })()}
                     </td>
                     <td className="px-2 py-2.5 text-center text-muted-foreground/50">
-                      <ChevronRight className="h-4 w-4 inline" />
+                      <ChevronRight className={`h-4 w-4 inline transition-transform ${largeEntry === d.docEntry ? "rotate-90" : ""}`} />
                     </td>
                   </tr>
+                  {/* Déroulé EN PLACE (accordéon) — plus de page/panneau séparé. */}
+                  {largeEntry === d.docEntry && (
+                    <tr className="bg-secondary/20">
+                      <td colSpan={restricted ? 7 : 8} className="p-0">
+                        <div className="border-t border-brand-500/30 px-4 py-4">
+                          <ReceiptDetail
+                            receipt={d}
+                            dlc={dlcMap[d.lot]}
+                            onDlcSaved={mergeDlc}
+                            incidents={byDoc.get(d.docEntry) ?? []}
+                            onIncidentChanged={reloadIncidents}
+                            onNumAtCardChange={updateNumAtCard}
+                            onModified={load}
+                            agreage={agreages[d.docEntry] ?? null}
+                            restricted={restricted}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                     ))}
                   </Fragment>
                 ))}
@@ -639,46 +673,8 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
       </SurfaceCard>
 
       <OpenReceptionIncidents incidents={incidents} loading={incLoading} onChanged={reloadIncidents} />
-
-      {/* ── Détail PLEIN ÉCRAN d'une entrée marchandise (on oublie le fond) ── */}
-      <FullscreenPanel
-        open={!!largeDoc}
-        onOpenChange={(o) => { if (!o) setLargeEntry(null); }}
-        title={
-          <span className={`inline-flex items-center gap-2 min-w-0 ${largeHasIncident ? "text-rose-600 dark:text-rose-400" : ""}`}>
-            {largeHasIncident && <AlertTriangle className="h-5 w-5 shrink-0" />}
-            <span className="truncate">{largeDoc?.cardName || largeDoc?.cardCode || ""}</span>
-          </span>
-        }
-        subtitle={
-          largeDoc ? (
-            <span className="inline-flex items-center gap-2 flex-wrap">
-              <span className="font-mono">EM n° {largeDoc.docNum}</span>
-              {/* Commande d'achat liée (CF <n°>) — cliquable pour l'ouvrir. */}
-              {largeDoc.po && <CfLink po={largeDoc.po} onOpen={openCf} />}
-              <span className="tnum">· {fmtJourDate(largeDoc.docDate)}{heureFromDocRef(largeDoc.comments) ? ` à ${heureFromDocRef(largeDoc.comments)}` : ""}</span>
-              {creatorFromDocRef(largeDoc.comments) && <span className="text-muted-foreground">· {creatorFromDocRef(largeDoc.comments)}</span>}
-              {largeDoc.lot && <FreshnessBadge dlc={dlcMap[largeDoc.lot]} className="shrink-0" />}
-              <CancelBadge d={largeDoc} />
-            </span>
-          ) : undefined
-        }
-        highlight={!restricted && largeDoc ? <>{eur(largeDoc.totalHT ?? 0)} <span className="text-[12px] font-sans font-medium text-muted-foreground">HT</span></> : undefined}
-      >
-        {largeDoc && (
-          <ReceiptDetail
-            receipt={largeDoc}
-            dlc={dlcMap[largeDoc.lot]}
-            onDlcSaved={mergeDlc}
-            incidents={byDoc.get(largeDoc.docEntry) ?? []}
-            onIncidentChanged={reloadIncidents}
-            onNumAtCardChange={updateNumAtCard}
-            onModified={load}
-            agreage={agreages[largeDoc.docEntry] ?? null}
-            restricted={restricted}
-          />
-        )}
-      </FullscreenPanel>
+      {/* Le détail d'une entrée se déroule EN PLACE (accordéon) dans la liste —
+          plus de panneau plein écran. */}
     </div>
   );
 }

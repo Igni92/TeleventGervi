@@ -8,7 +8,6 @@ import {
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FullscreenPanel } from "@/components/ui/fullscreen-panel";
 import { InfoHint } from "@/components/ui/info-hint";
 import { StatBlock } from "@/components/ui/stat-block";
 import { AnimatedNumber } from "@/components/ui/animated-number";
@@ -160,7 +159,6 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
 
   const dayGroups = useMemo(() => groupByDay(filtered), [filtered]);
   const hasFilters = query.trim() !== "" || dateFilter !== "";
-  const largeDoc = largeEntry != null ? docs.find((d) => d.docEntry === largeEntry) ?? null : null;
   const dueCount = useMemo(() => docs.filter(isDue).length, [docs]);
 
   return (
@@ -240,12 +238,13 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
                 {g.rows.map((d) => {
                   const heure = heureFromDocRef(d.comments);
                   const creator = creatorFromDocRef(d.comments);
+                  const expanded = largeEntry === d.docEntry;
                   return (
+                  <div key={d.docEntry} className="rounded-2xl border border-border bg-card overflow-hidden">
                   <button
-                    key={d.docEntry}
                     type="button"
-                    onClick={() => setLargeEntry(d.docEntry)}
-                    className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
+                    onClick={() => setLargeEntry(expanded ? null : d.docEntry)}
+                    className="w-full flex items-center gap-3 p-4 text-left active:bg-secondary/40"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="text-[15px] font-semibold text-foreground truncate">
@@ -267,9 +266,15 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
                           <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
                         </div>
                       )}
-                      <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
+                      <ChevronRight className={`h-5 w-5 text-muted-foreground/50 transition-transform ${expanded ? "rotate-90" : ""}`} />
                     </div>
                   </button>
+                  {expanded && (
+                    <div className="border-t border-brand-500/30 px-3 py-3">
+                      <PurchaseOrderEditor po={d} restricted={restricted} onDone={() => { setLargeEntry(null); load(); }} onModified={load} />
+                    </div>
+                  )}
+                  </div>
                   );
                 })}
               </div>
@@ -306,10 +311,10 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
                       </td>
                     </tr>
                     {g.rows.map((d) => (
+                  <Fragment key={d.docEntry}>
                   <tr
-                    key={d.docEntry}
-                    onClick={() => setLargeEntry(d.docEntry)}
-                    className="border-t border-border/60 hover:bg-secondary/30 cursor-pointer transition-colors"
+                    onClick={() => setLargeEntry(largeEntry === d.docEntry ? null : d.docEntry)}
+                    className={`border-t border-border/60 hover:bg-secondary/30 cursor-pointer transition-colors ${largeEntry === d.docEntry ? "bg-secondary/40" : ""}`}
                   >
                     <td className="px-3 py-2.5 font-mono font-semibold">n° {d.docNum}</td>
                     <td className="px-3 py-2.5">
@@ -331,8 +336,19 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
                     <td className="px-3 py-2.5">{isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}</td>
                     <td className="px-3 py-2.5"><EmLinks ems={d.ems} onOpen={openEm} /></td>
                     {!restricted && <td className="px-3 py-2.5 text-right tnum font-display font-bold text-[15px]">{eur(d.totalHT ?? 0)}</td>}
-                    <td className="px-2 py-2.5 text-right"><ChevronRight className="h-4 w-4 text-muted-foreground/50 inline" /></td>
+                    <td className="px-2 py-2.5 text-right"><ChevronRight className={`h-4 w-4 text-muted-foreground/50 inline transition-transform ${largeEntry === d.docEntry ? "rotate-90" : ""}`} /></td>
                   </tr>
+                  {/* Déroulé EN PLACE (accordéon) — plus de page/panneau séparé. */}
+                  {largeEntry === d.docEntry && (
+                    <tr className="bg-secondary/20">
+                      <td colSpan={restricted ? 6 : 7} className="p-0">
+                        <div className="border-t border-brand-500/30 px-4 py-4">
+                          <PurchaseOrderEditor po={d} restricted={restricted} onDone={() => { setLargeEntry(null); load(); }} onModified={load} />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                     ))}
                   </Fragment>
                 ))}
@@ -341,34 +357,7 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
           </div>
         )}
       </SurfaceCard>
-
-      {/* ── Détail PLEIN ÉCRAN (on oublie le fond) ── */}
-      <FullscreenPanel
-        open={!!largeDoc}
-        onOpenChange={(o) => { if (!o) setLargeEntry(null); }}
-        title={largeDoc?.cardName || largeDoc?.cardCode || ""}
-        subtitle={
-          largeDoc ? (
-            <span className="inline-flex items-center gap-2 flex-wrap">
-              <span className="font-mono">CF n° {largeDoc.docNum}</span>
-              <span className="tnum">· Livraison {fmtDate(largeDoc.dueDate)}</span>
-              {isDue(largeDoc) ? <DueBadge /> : <StatusBadge open={largeDoc.open} cancelled={largeDoc.cancelled} />}
-            </span>
-          ) : undefined
-        }
-        highlight={!restricted && largeDoc ? <>{eur(largeDoc.totalHT ?? 0)} <span className="text-[12px] font-sans font-medium text-muted-foreground">HT</span></> : undefined}
-      >
-        {largeDoc && (
-          <div className="mx-auto max-w-5xl">
-            <PurchaseOrderEditor
-              po={largeDoc}
-              restricted={restricted}
-              onDone={() => { setLargeEntry(null); load(); }}
-              onModified={load}
-            />
-          </div>
-        )}
-      </FullscreenPanel>
+      {/* Le détail d'une CF se déroule EN PLACE (accordéon) dans la liste. */}
     </div>
   );
 }
