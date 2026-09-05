@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScheduleDialog } from "@/components/rh/ScheduleDialog";
 
-type Contract = { id: string; type: string; statut: string; dateDebut: string; dateFin: string | null; essaiFin: string | null; heuresHebdo: number; saisonLabel: string | null; horairesJson?: string | null };
+type Contract = { id: string; type: string; statut: string; dateDebut: string; dateFin: string | null; essaiFin: string | null; heuresHebdo: number; saisonLabel: string | null; horairesJson?: string | null; annualise?: boolean };
 type Event = { id: string; type: string; date: string; meta: string | null; createdBy: string | null };
 type Doc = { id: string; type: string; nom: string; mime: string | null; visibleSalarie: boolean; createdAt: string; uploadedBy: string | null; contractId: string | null };
 type Emp = {
@@ -291,6 +291,7 @@ function ContractDialog({ employeeId, contract, onClose, onSaved, onDelete }: {
   const [essaiFin, setEssaiFin] = useState(contract ? dISO(contract.essaiFin) : "");
   const [heuresHebdo, setHeuresHebdo] = useState(String(contract?.heuresHebdo ?? 35));
   const [saisonLabel, setSaisonLabel] = useState(contract?.saisonLabel ?? "");
+  const [annualise, setAnnualise] = useState(contract?.annualise !== false);
   const [cloturer, setCloturer] = useState(true);
   const [saving, setSaving] = useState(false);
   const openEnded = OPEN_ENDED.has(type);
@@ -303,7 +304,7 @@ function ContractDialog({ employeeId, contract, onClose, onSaved, onDelete }: {
         const body: Record<string, unknown> = {
           type, statut, dateDebut, essaiFin: essaiFin || null,
           heuresHebdo: Number(heuresHebdo) || 35, saisonLabel: seasonal ? (saisonLabel || null) : null,
-          dateFin: openEnded ? null : (dateFin || null),
+          dateFin: openEnded ? null : (dateFin || null), annualise,
         };
         const r = await fetch(`/api/rh/contracts/${contract!.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const j = await r.json();
@@ -311,7 +312,7 @@ function ContractDialog({ employeeId, contract, onClose, onSaved, onDelete }: {
         toast.success("Contrat mis à jour"); onSaved();
       } else {
         const r = await fetch("/api/rh/contracts", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ employeeId, type, dateDebut, dateFin: openEnded ? undefined : (dateFin || undefined), essaiFin: essaiFin || undefined, heuresHebdo: Number(heuresHebdo) || 35, saisonLabel: seasonal ? (saisonLabel || undefined) : undefined, cloturerPrecedents: cloturer }) });
+          body: JSON.stringify({ employeeId, type, dateDebut, dateFin: openEnded ? undefined : (dateFin || undefined), essaiFin: essaiFin || undefined, heuresHebdo: Number(heuresHebdo) || 35, saisonLabel: seasonal ? (saisonLabel || undefined) : undefined, annualise, cloturerPrecedents: cloturer }) });
         const j = await r.json();
         if (!r.ok || !j.ok) { toast.error(j.error || "Échec"); return; }
         toast.success("Contrat ajouté"); onSaved();
@@ -349,6 +350,11 @@ function ContractDialog({ employeeId, contract, onClose, onSaved, onDelete }: {
             )}
           </div>
           {openEnded && <p className="text-[11px] text-muted-foreground">{type} = durée indéterminée : aucune date de fin (elle n&apos;apparaîtra qu&apos;à la fin de contrat).</p>}
+          <label className="flex items-center gap-2 text-caption text-foreground">
+            <input type="checkbox" checked={annualise} onChange={(e) => setAnnualise(e.target.checked)} />
+            Annualiser le temps de travail (IDCC 1405, 1600 h)
+          </label>
+          {!annualise && <p className="text-[11px] text-muted-foreground -mt-1">Décoché : les heures sont décomptées à la semaine (majorations hebdo), sans régularisation annuelle 1600 h.</p>}
           {!editMode && (
             <label className="flex items-center gap-2 text-caption text-foreground">
               <input type="checkbox" checked={cloturer} onChange={(e) => setCloturer(e.target.checked)} />

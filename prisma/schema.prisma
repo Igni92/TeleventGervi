@@ -1478,6 +1478,9 @@ model Contract {
   essaiFin        DateTime? // fin de période d'essai (alerte)
   heuresHebdo     Float     @default(35) // base légale majorations (35/39/42…)
   heuresAnnuelles Float     @default(1600) // annualisation IDCC 1405
+  // Annualisation du temps de travail activée pour ce contrat ? (parfois non
+  // possible/souhaité). Colonne additive (raw SQL). Défaut true.
+  annualise       Boolean   @default(true)
   tempsPartiel    Boolean   @default(false)
   classification  String? // niveau/coefficient IDCC 1405
   tauxHoraire     Float?

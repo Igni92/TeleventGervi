@@ -31,6 +31,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   if ("statut" in b && ["brouillon", "actif", "termine"].includes(String(b.statut))) data.statut = String(b.statut);
   if ("heuresHebdo" in b && typeof b.heuresHebdo === "number") data.heuresHebdo = b.heuresHebdo;
   if ("heuresAnnuelles" in b && typeof b.heuresAnnuelles === "number") data.heuresAnnuelles = b.heuresAnnuelles;
+  if ("annualise" in b && typeof b.annualise === "boolean") data.annualise = b.annualise;
   if ("classification" in b) data.classification = b.classification ? String(b.classification) : null;
   if ("saisonLabel" in b) data.saisonLabel = b.saisonLabel ? String(b.saisonLabel) : null;
   if ("horairesJson" in b) {

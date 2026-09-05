@@ -29,7 +29,7 @@ export async function gatherAnnual(year: number, now = new Date()): Promise<Annu
   const [badgeuse, employees, contracts, clocks, holidays, leaves] = await Promise.all([
     isBadgeuseEnabled(),
     prisma.employee.findMany({ where: { statutEmploi: "actif" }, orderBy: [{ displayName: "asc" }, { email: "asc" }], select: { id: true, displayName: true, email: true, poste: true } }),
-    prisma.contract.findMany({ where: { statut: "actif" }, select: { employeeId: true, heuresHebdo: true, horairesJson: true, tauxHoraire: true, type: true, dateDebut: true, dateFin: true } }),
+    prisma.contract.findMany({ where: { statut: "actif" }, select: { employeeId: true, heuresHebdo: true, horairesJson: true, tauxHoraire: true, type: true, dateDebut: true, dateFin: true, annualise: true } }),
     prisma.rhTimeClock.findMany({ where: { date: { gte: start, lt: end } }, select: { employeeId: true, heuresMin: true } }),
     prisma.rhHoliday.findMany({ where: { date: { gte: start, lt: end } }, select: { date: true } }),
     prisma.rhLeaveRequest.findMany({ where: { statut: "approved", startDate: { lt: end }, endDate: { gte: start } }, select: { employeeId: true, startDate: true, endDate: true } }),
@@ -44,9 +44,11 @@ export async function gatherAnnual(year: number, now = new Date()): Promise<Annu
     for (let t = new Date(l.startDate); t <= l.endDate; t = new Date(t.getTime() + 86400000)) absent.add(`${l.employeeId}|${dk(t)}`);
   }
 
-  const rows: AnnualRow[] = employees.map((emp) => {
+  const rows: AnnualRow[] = employees.flatMap((emp) => {
     const ct = ctById.get(emp.id);
-    const contractHours = ct?.heuresHebdo ?? 35;
+    // Seuls les contrats ANNUALISÉS figurent au tableau d'annualisation.
+    if (!ct || ct.annualise === false) return [];
+    const contractHours = ct.heuresHebdo ?? 35;
     const saisonnier = ct?.type === "SAISONNIER";
     const fPres = fractionPresence(start, end, ct?.dateDebut ?? null, ct?.dateFin ?? null);
     const fEcoul = fractionEcoulee(start, end, now);
@@ -55,7 +57,7 @@ export async function gatherAnnual(year: number, now = new Date()): Promise<Annu
     let realisedMin = 0;
     if (badgeuse) {
       realisedMin = clockMin.get(emp.id) ?? 0;
-    } else if (ct) {
+    } else {
       const sched = parseSchedule(ct.horairesJson ?? null, contractHours);
       const from = ct.dateDebut > start ? ct.dateDebut : start;
       const to = ct.dateFin && ct.dateFin < end ? ct.dateFin : end;
@@ -68,7 +70,7 @@ export async function gatherAnnual(year: number, now = new Date()): Promise<Annu
     }
 
     const result = computeAnnual({ heuresRealisees: realisedMin / 60, fractionPresence: fPres, fractionEcoulee: fEcoul }, saisonnier);
-    return { employeeId: emp.id, name: emp.displayName ?? emp.email, poste: emp.poste, saisonnier, contractHours, tauxHoraire: ct?.tauxHoraire ?? null, fractionPresence: fPres, fractionEcoulee: fEcoul, result };
+    return [{ employeeId: emp.id, name: emp.displayName ?? emp.email, poste: emp.poste, saisonnier, contractHours, tauxHoraire: ct.tauxHoraire ?? null, fractionPresence: fPres, fractionEcoulee: fEcoul, result }];
   });
 
   return { year, badgeuse, rows };

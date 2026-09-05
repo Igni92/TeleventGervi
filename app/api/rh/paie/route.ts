@@ -4,7 +4,9 @@ import { requireAdmin } from "@/lib/permissions";
 import { isRhV2Enabled } from "@/lib/rh/flag";
 import { isBadgeuseEnabled } from "@/lib/rh/settings";
 import { parseSchedule, plannedNetForDate } from "@/lib/rh/schedule";
-import { isTreiziemeMonth, prorata13e } from "@/lib/salaires";
+import { isTreiziemeMonth, prorata13e, avantageNatureMensuel } from "@/lib/salaires";
+import { listSalaryProfiles } from "@/lib/salairesRh";
+import { commissionBalances } from "@/lib/commissions";
 import { gatherAnnual } from "@/lib/rh/annualAggregate";
 import { prisma } from "@/lib/prisma";
 
@@ -35,7 +37,7 @@ export async function GET(req: NextRequest) {
 
   const [badgeuse, employees, clocks, elements, sends, contracts, holidays, leaves] = await Promise.all([
     isBadgeuseEnabled(),
-    prisma.employee.findMany({ where: { statutEmploi: "actif" }, orderBy: [{ displayName: "asc" }, { email: "asc" }], select: { id: true, displayName: true, email: true, poste: true, hireDate: true } }),
+    prisma.employee.findMany({ where: { statutEmploi: "actif" }, orderBy: [{ displayName: "asc" }, { email: "asc" }], select: { id: true, displayName: true, email: true, poste: true, hireDate: true, sapSlpName: true } }),
     prisma.rhTimeClock.findMany({ where: { date: { gte: start, lt: end } }, select: { employeeId: true, heuresMin: true } }),
     prisma.rhPayrollElement.findMany({ where: { mois }, orderBy: { createdAt: "asc" }, select: { id: true, employeeId: true, type: true, label: true, montant: true, statut: true } }),
     prisma.rhPayrollSend.findMany({ where: { mois }, orderBy: { sentAt: "desc" }, take: 5 }),
@@ -71,53 +73,77 @@ export async function GET(req: NextRequest) {
   const elByEmp = new Map<string, typeof elements>();
   for (const e of elements) { const a = elByEmp.get(e.employeeId) ?? []; a.push(e); elByEmp.set(e.employeeId, a); }
 
+  // ── ÉLÉMENTS AUTOMATIQUES (recalculés, non persistés) : commissions dues,
+  //    avantage en nature véhicule, demi-13e, régularisation annualisation. Le
+  //    gérant n'a rien à saisir — ils sont intégrés au total et à l'envoi compta.
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const ctById = new Map(contracts.map((c) => [c.employeeId, c]));
+  type Auto = { type: string; label: string; montant: number };
+  const autoByEmp = new Map<string, Auto[]>();
+  const addAuto = (empId: string, a: Auto) => { const l = autoByEmp.get(empId) ?? []; l.push(a); autoByEmp.set(empId, l); };
+
+  // Sources externes (best-effort — un échec n'invalide pas la paie manuelle).
+  const [commissions, salProfilesRaw] = await Promise.all([
+    commissionBalances().catch(() => new Map()),
+    listSalaryProfiles().catch(() => new Map()),
+  ]);
+  // Ré-indexe les profils salaire par email en minuscules (tolérant à la casse).
+  const salProfiles = new Map<string, ReturnType<typeof salProfilesRaw.get>>();
+  for (const [k, v] of salProfilesRaw) salProfiles.set(k.toLowerCase(), v);
+
+  for (const emp of employees) {
+    // 1) Commission due (reste à payer) — jointure par nom SAP (slpName).
+    if (emp.sapSlpName) {
+      const c = commissions.get(emp.sapSlpName);
+      if (c && c.ecart > 0.005) addAuto(emp.id, { type: "commission", label: `Commission ventes (reste dû, ${Math.round((c.rate ?? 0) * 100)}%)`, montant: round2(c.ecart) });
+    }
+    // 2) Avantage en nature véhicule (mensuel) — profil salaire (AppSetting).
+    const prof = emp.email ? salProfiles.get(emp.email.toLowerCase()) : null;
+    if (prof?.vehicule) {
+      const m = round2(avantageNatureMensuel(prof.vehicule));
+      if (m > 0) addAuto(emp.id, { type: "vehicule_an", label: "Avantage en nature véhicule", montant: m });
+    }
+    // 3) Demi-13e mois (juin & décembre), prorata ancienneté — si activé (profil) ou taux connu.
+    if (isTreiziemeMonth(mois)) {
+      const ct = ctById.get(emp.id);
+      const wants13 = prof?.treizieme === true || (prof?.treizieme == null && !!ct?.tauxHoraire);
+      if (wants13 && ct?.tauxHoraire) {
+        const prorata = prorata13e(emp.hireDate ? new Date(emp.hireDate).toISOString().slice(0, 10) : (prof?.cdiDate ?? null), mois) ?? 1;
+        const montant = round2((ct.tauxHoraire * ct.heuresHebdo * 52 / 12 / 2) * prorata);
+        if (prorata > 0 && montant > 0) addAuto(emp.id, { type: "treizieme", label: `½ 13e mois (${mois.endsWith("-06") ? "juin" : "décembre"}${prorata < 1 ? `, prorata ${Math.round(prorata * 100)}%` : ""})`, montant });
+      }
+    }
+  }
+
+  // 4) Régularisation annuelle de l'annualisation (décembre) — heures supp de
+  //    l'année ×1,25, contrats annualisés seulement (gatherAnnual filtre déjà).
+  if (mois.endsWith("-12")) {
+    try {
+      const board = await gatherAnnual(Number(mois.slice(0, 4)));
+      for (const r of board.rows) {
+        if (r.result.heuresSuppAnnee <= 0) continue;
+        const taux = ctById.get(r.employeeId)?.tauxHoraire ?? 0;
+        const montant = round2(r.result.heuresSuppAnnee * taux * 1.25);
+        if (montant > 0) addAuto(r.employeeId, { type: "autre", label: `Régularisation annualisation — ${r.result.heuresSuppAnnee} h supp (+25 %)`, montant });
+      }
+    } catch { /* annualisation indispo → pas de régul auto */ }
+  }
+
   const rows = employees.map((emp) => {
     const els = elByEmp.get(emp.id) ?? [];
+    const auto = autoByEmp.get(emp.id) ?? [];
     return {
       employeeId: emp.id,
       name: emp.displayName ?? emp.email,
       poste: emp.poste,
       workedMin: workedByEmp.get(emp.id) ?? 0,
       elements: els,
-      elementsTotal: els.reduce((s, e) => s + e.montant, 0),
+      auto, // lignes automatiques (recalculées)
+      elementsTotal: els.reduce((s, e) => s + e.montant, 0) + auto.reduce((s, a) => s + a.montant, 0),
     };
   });
 
-  // ── Suggestions d'éléments (non persistées) : demi-13e (juin/déc) + régularisation
-  //    annualisation (décembre). Le gérant les ajoute d'un clic.
-  const ctById = new Map(contracts.map((c) => [c.employeeId, c]));
-  const suggestions: Record<string, { type: string; label: string; montant: number }[]> = {};
-  const push = (empId: string, s: { type: string; label: string; montant: number }) => { (suggestions[empId] = suggestions[empId] ?? []).push(s); };
-  const round2 = (n: number) => Math.round(n * 100) / 100;
-
-  if (isTreiziemeMonth(mois)) {
-    const semestre = mois.endsWith("-06") ? "juin" : "décembre";
-    for (const emp of employees) {
-      const ct = ctById.get(emp.id); if (!ct?.tauxHoraire) continue;
-      const prorata = prorata13e(emp.hireDate ? new Date(emp.hireDate).toISOString().slice(0, 10) : null, mois) ?? 1;
-      if (prorata <= 0) continue;
-      const baseMensuelle = ct.tauxHoraire * ct.heuresHebdo * 52 / 12;
-      const montant = round2((baseMensuelle / 2) * prorata);
-      if (montant > 0) push(emp.id, { type: "treizieme", label: `½ 13e mois (${semestre}${prorata < 1 ? `, prorata ${Math.round(prorata * 100)}%` : ""})`, montant });
-    }
-  }
-
-  if (mois.endsWith("-12")) {
-    // Régularisation annuelle de l'annualisation : les heures supp de l'année,
-    // majorées +25 %, à régler en fin de période.
-    try {
-      const board = await gatherAnnual(Number(mois.slice(0, 4)));
-      for (const r of board.rows) {
-        if (r.result.heuresSuppAnnee <= 0) continue;
-        const ct = ctById.get(r.employeeId);
-        const taux = ct?.tauxHoraire ?? 0;
-        const montant = round2(r.result.heuresSuppAnnee * taux * 1.25);
-        push(r.employeeId, { type: "autre", label: `Régularisation annualisation — ${r.result.heuresSuppAnnee} h supp (+25 %)`, montant });
-      }
-    } catch { /* annualisation indispo → pas de suggestion */ }
-  }
-
-  return NextResponse.json({ ok: true, mois, types: ELEMENT_TYPES, rows, sends, suggestions });
+  return NextResponse.json({ ok: true, mois, types: ELEMENT_TYPES, rows, sends });
 }
 
 /** POST /api/rh/paie — actions : add (élément) · delete · send (recap compta). */

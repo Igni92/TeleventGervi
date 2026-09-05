@@ -72,6 +72,7 @@ export async function POST(req: NextRequest) {
         essaiFin: essaiFin && !Number.isNaN(essaiFin.getTime()) ? essaiFin : null,
         heuresHebdo: typeof b.heuresHebdo === "number" ? b.heuresHebdo : 35,
         heuresAnnuelles: typeof b.heuresAnnuelles === "number" ? b.heuresAnnuelles : 1600,
+        annualise: b.annualise !== false, // défaut true
         tempsPartiel: !!b.tempsPartiel,
         classification: b.classification ? String(b.classification) : null,
         tauxHoraire: typeof b.tauxHoraire === "number" ? b.tauxHoraire : null,

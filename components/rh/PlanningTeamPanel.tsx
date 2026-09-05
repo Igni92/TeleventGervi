@@ -96,7 +96,6 @@ export function PlanningTeamPanel({ initialWeek }: { initialWeek: string }) {
                           className={`inline-block min-w-[52px] rounded-md px-2 py-1 text-[11.5px] font-medium hover:ring-1 hover:ring-brand-500/50 transition ${c.cls}`} title={showPlanned ? `Prévu ${fmtHM(d.plannedMin)} · pointé ${fmtHM(d.actualMin)} — cliquer pour modifier` : "Cliquer pour modifier"}>
                           {d.tag === "present" ? fmtHM(d.actualMin || d.min) : c.label === "—" ? "—" : c.label}
                         </button>
-                        {showPlanned && <span className="block text-[9px] text-muted-foreground mt-0.5">prévu {fmtHM(d.plannedMin)}</span>}
                       </td>
                     );
                   })}
