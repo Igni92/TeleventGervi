@@ -108,6 +108,7 @@ export function SupplierForm({ initialData, mode, onSaved, onCancel }: SupplierF
       tel2: initialData?.tel2 || "",
       tel3: initialData?.tel3 || "",
       adresse: initialData?.adresse || "",
+      pays: initialData?.pays || "",
       notes: initialData?.notes || "",
     },
   });
@@ -273,6 +274,12 @@ export function SupplierForm({ initialData, mode, onSaved, onCancel }: SupplierF
         <Label htmlFor="adresse">Adresse</Label>
         <Textarea id="adresse" placeholder="Siège / dépôt fournisseur…" rows={2} {...register("adresse")} className={errors.adresse ? "border-destructive" : ""} />
         {errors.adresse && <p className="text-sm text-destructive">{errors.adresse.message}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="pays">Pays</Label>
+        <Input id="pays" placeholder="France, Espagne, Maroc…" {...register("pays")} className={errors.pays ? "border-destructive" : ""} />
+        {errors.pays && <p className="text-sm text-destructive">{errors.pays.message}</p>}
       </div>
 
       {/* Notes */}

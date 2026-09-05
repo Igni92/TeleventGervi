@@ -36,10 +36,19 @@ export async function GET(req: NextRequest) {
     const suppliers = await prisma.supplier.findMany({
       where,
       orderBy: { nom: "asc" },
-      include: { _count: { select: { contacts: true } } },
+      include: {
+        _count: { select: { contacts: true } },
+        // Contact par DÉFAUT (le premier, position la plus basse) — colonne « Nom, prénom ».
+        contacts: { orderBy: [{ position: "asc" }, { createdAt: "asc" }], take: 1, select: { name: true } },
+      },
     });
-
-    return NextResponse.json({ suppliers, total: suppliers.length });
+    // Aplati : `pays` + `contactDefault` (nom du 1er contact) exposés à la liste.
+    const rows = suppliers.map((s) => ({
+      ...s,
+      contactDefault: s.contacts[0]?.name ?? null,
+      contacts: undefined,
+    }));
+    return NextResponse.json({ suppliers: rows, total: rows.length });
   } catch (error) {
     console.error("[GET /api/suppliers]", error);
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
@@ -74,6 +83,7 @@ export async function POST(req: NextRequest) {
         tel2: data.tel2 || null,
         tel3: data.tel3 || null,
         adresse: data.adresse?.trim() || null,
+        pays: data.pays?.trim() || null,
         notes: data.notes?.trim() || null,
       },
     });

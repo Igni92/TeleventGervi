@@ -104,6 +104,11 @@ export const supplierSchema = z.object({
     .max(500, "L'adresse ne peut pas dépasser 500 caractères")
     .optional()
     .or(z.literal("")),
+  pays: z
+    .string()
+    .max(100, "Le pays ne peut pas dépasser 100 caractères")
+    .optional()
+    .or(z.literal("")),
   notes: z
     .string()
     .max(2000, "Les notes ne peuvent pas dépasser 2000 caractères")

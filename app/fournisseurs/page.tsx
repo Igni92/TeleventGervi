@@ -5,6 +5,7 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SupplierTable } from "@/components/suppliers/SupplierTable";
 import { PageHeader } from "@/components/ui/page-header";
+import { requireAdmin } from "@/lib/permissions";
 
 export const metadata = { title: "Fournisseurs" };
 export const dynamic = "force-dynamic";
@@ -12,6 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function FournisseursPage() {
   const session = await auth();
   if (!session) redirect("/login");
+  const canManage = await requireAdmin(session); // sélection/archivage groupé : direction only
 
   return (
     <div className="space-y-5 sm:space-y-6 animate-fade-up">
@@ -35,7 +37,7 @@ export default async function FournisseursPage() {
         }
       />
 
-      <SupplierTable />
+      <SupplierTable canManage={canManage} />
     </div>
   );
 }

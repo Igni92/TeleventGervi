@@ -50,6 +50,7 @@ export async function PUT(req: NextRequest, props: { params: Promise<{ id: strin
         tel2: data.tel2 || null,
         tel3: data.tel3 || null,
         adresse: data.adresse?.trim() || null,
+        pays: data.pays?.trim() || null,
         notes: data.notes?.trim() || null,
         // `active` optionnel — on ne le touche que s'il est explicitement fourni.
         ...(typeof body?.active === "boolean" ? { active: body.active } : {}),

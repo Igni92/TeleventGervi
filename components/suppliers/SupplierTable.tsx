@@ -21,6 +21,8 @@ interface SupplierRow {
   sapCardCode: string | null;
   email: string | null;
   tel1: string | null;
+  pays: string | null;
+  contactDefault: string | null;
   active: boolean;
   _count?: { contacts: number };
 }
@@ -31,12 +33,14 @@ const FILTERS = [
   { key: "inactifs", label: "Archivés" },
 ] as const;
 
-export function SupplierTable() {
+export function SupplierTable({ canManage = false }: { canManage?: boolean }) {
   const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [active, setActive] = useState<string>("actifs");
   const [importing, setImporting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set()); // sélection multiple (direction)
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [view, setView] = useViewMode("televent-suppliers-view");
   const router = useRouter();
   const { menu, openAt, close } = useContextMenu(230, 260);
@@ -113,6 +117,20 @@ export function SupplierTable() {
     }
   }, [close, load]);
 
+  const toggleSel = useCallback((id: string) => setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
+  const bulk = useCallback(async (action: "activate" | "archive") => {
+    const ids = [...selected]; if (ids.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const res = await fetch("/api/suppliers/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, action }) });
+      const j = await res.json();
+      if (!res.ok || !j.ok) throw new Error(j.error || "Échec");
+      toast.success(`${j.count} fournisseur${j.count > 1 ? "s" : ""} ${action === "activate" ? "réactivé" : "archivé"}${j.count > 1 ? "s" : ""}`);
+      setSelected(new Set()); load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Échec"); }
+    finally { setBulkBusy(false); }
+  }, [selected, load]);
+
   // Débounce léger sur la recherche + auto-amorçage si le référentiel est vide.
   useEffect(() => {
     const t = setTimeout(async () => {
@@ -171,8 +189,20 @@ export function SupplierTable() {
         <div className="ml-auto"><ViewToggle value={view} onChange={setView} /></div>
       </div>
       <p className="-mt-1 text-[11.5px] text-muted-foreground">
-        Astuce : <b>clic droit</b> sur un fournisseur pour le modifier sans ouvrir la fiche.
+        Astuce : <b>clic droit</b> sur un fournisseur pour le modifier sans ouvrir la fiche.{canManage && <> Cochez pour <b>activer / archiver</b> en masse.</>}
       </p>
+
+      {/* Barre d'actions groupées (direction) — visible dès qu'une case est cochée. */}
+      {canManage && selected.size > 0 && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-brand-500/40 bg-brand-500/[0.06] px-4 py-2.5">
+          <span className="text-[13px] font-medium text-foreground">{selected.size} sélectionné{selected.size > 1 ? "s" : ""}</span>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => bulk("activate")} disabled={bulkBusy}><ArchiveRestore className="h-3.5 w-3.5" /> Activer</Button>
+            <Button size="sm" variant="outline" onClick={() => bulk("archive")} disabled={bulkBusy}><Archive className="h-3.5 w-3.5" /> Archiver</Button>
+            <button type="button" onClick={() => setSelected(new Set())} className="text-[12px] text-muted-foreground hover:text-foreground">Annuler</button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
@@ -232,7 +262,8 @@ export function SupplierTable() {
           ))}
         </ul>
       ) : (
-        <SupplierListView suppliers={suppliers} onContext={openCtx} />
+        <SupplierListView suppliers={suppliers} onContext={openCtx} canManage={canManage} selected={selected} onToggleSel={toggleSel}
+          onToggleAll={() => setSelected((prev) => prev.size === suppliers.length ? new Set() : new Set(suppliers.map((s) => s.id)))} />
       )}
 
       <ContextMenu menu={menu} onClose={close}>
@@ -255,14 +286,21 @@ export function SupplierTable() {
 }
 
 /** Vue LISTE classique (tableau compact) des fournisseurs. */
-function SupplierListView({ suppliers, onContext }: { suppliers: SupplierRow[]; onContext: (e: ReactMouseEvent, s: SupplierRow) => void }) {
+function SupplierListView({ suppliers, onContext, canManage, selected, onToggleSel, onToggleAll }: {
+  suppliers: SupplierRow[]; onContext: (e: ReactMouseEvent, s: SupplierRow) => void;
+  canManage: boolean; selected: Set<string>; onToggleSel: (id: string) => void; onToggleAll: () => void;
+}) {
+  const allChecked = suppliers.length > 0 && selected.size === suppliers.length;
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
       <div className="overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+              {canManage && <th className="px-3 py-2.5 w-9 text-center"><input type="checkbox" checked={allChecked} onChange={onToggleAll} className="accent-brand-500 align-middle" aria-label="Tout sélectionner" /></th>}
               <th className="px-3 py-2.5 text-left font-semibold">Fournisseur</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Nom, prénom</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Pays</th>
               <th className="px-3 py-2.5 text-left font-semibold">Code</th>
               <th className="px-3 py-2.5 text-left font-semibold">Famille</th>
               <th className="px-3 py-2.5 text-left font-semibold">Téléphone</th>
@@ -273,13 +311,16 @@ function SupplierListView({ suppliers, onContext }: { suppliers: SupplierRow[]; 
           </thead>
           <tbody className="divide-y divide-border">
             {suppliers.map((s) => (
-              <tr key={s.id} onContextMenu={(e) => onContext(e, s)} title="Clic droit pour modifier" className="cursor-context-menu transition-colors hover:bg-secondary/30">
+              <tr key={s.id} onContextMenu={(e) => onContext(e, s)} title="Clic droit pour modifier" className={`cursor-context-menu transition-colors hover:bg-secondary/30 ${selected.has(s.id) ? "bg-brand-500/[0.06]" : ""}`}>
+                {canManage && <td className="px-3 py-2 text-center"><input type="checkbox" checked={selected.has(s.id)} onChange={() => onToggleSel(s.id)} className="accent-brand-500 align-middle" aria-label={`Sélectionner ${s.nom}`} /></td>}
                 <td className="px-3 py-2">
                   <Link href={`/fournisseurs/${s.id}`} className="font-semibold text-foreground hover:text-brand-600 hover:underline underline-offset-2">
                     {s.nom}
                   </Link>
                   {!s.active && <Badge variant="annule" className="ml-2 text-[9.5px]">Archivé</Badge>}
                 </td>
+                <td className="px-3 py-2 text-[12px] text-muted-foreground max-w-[180px] truncate">{s.contactDefault || "—"}</td>
+                <td className="px-3 py-2 text-[12px] text-muted-foreground">{s.pays || "—"}</td>
                 <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{s.code}</td>
                 <td className="px-3 py-2">{s.type ? <Badge variant="secondary" className="text-[10px]">{s.type}</Badge> : <span className="text-muted-foreground/40">—</span>}</td>
                 <td className="px-3 py-2 font-mono text-[12px] text-muted-foreground">{s.tel1 ? formatPhoneDisplay(s.tel1) : "—"}</td>

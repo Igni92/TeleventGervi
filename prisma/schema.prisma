@@ -265,6 +265,8 @@ model Supplier {
   tel3        String?
   // Adresse libre (multi-ligne accepté) — siège / dépôt fournisseur.
   adresse     String?
+  // Pays du fournisseur (colonne additive, raw SQL). Libre.
+  pays        String?
   notes       String?
   // Fiche active (masquable sans supprimer l'historique). Défaut actif.
   active      Boolean           @default(true)
