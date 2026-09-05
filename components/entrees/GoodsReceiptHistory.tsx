@@ -504,10 +504,10 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                   key={d.docEntry}
                   type="button"
                   onClick={() => setLargeEntry(d.docEntry)}
-                  className={`w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40 ${isVoided(d) ? "opacity-60" : ""}`}
+                  className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className={`text-[15px] font-semibold truncate ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>
+                    <div className={`text-[15px] font-semibold truncate ${isVoided(d) ? "line-through text-rose-600 dark:text-rose-400" : "text-foreground"}`}>
                       <span className="font-mono text-muted-foreground text-[13px]">EM {d.docNum}</span> · {d.cardName || d.cardCode}
                     </div>
                     {/* Le jour est dans le bandeau → ligne = heure/auteur seulement. */}
@@ -571,20 +571,22 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                     {g.rows.map((d) => (
                   <tr
                     key={d.docEntry}
-                    className={`border-t border-border cursor-pointer transition-colors hover:bg-secondary/30 ${isVoided(d) ? "opacity-60" : ""}`}
+                    className="border-t border-border cursor-pointer transition-colors hover:bg-secondary/30"
                     onClick={() => setLargeEntry(d.docEntry)}
                   >
                     <td className="px-3 py-2.5 font-mono font-semibold whitespace-nowrap">
-                      <span className={isVoided(d) ? "line-through text-muted-foreground" : ""}>n° {d.docNum}</span>
-                      <CancelBadge d={d} className="ml-1.5 align-middle" />
+                      {/* Annulée = ENCRE ROUGE lisible (plus de gris clair illisible). */}
+                      <span className={isVoided(d) ? "line-through text-rose-600 dark:text-rose-400" : ""}>n° {d.docNum}</span>
                     </td>
                     <td className="px-3 py-2.5">
                       {/* L'IMPORTANT : le NOM du fournisseur, net et lisible.
-                          Le technique (code SAP, lot, réf. BL) vit derrière le « ? ». */}
+                          Le technique (code SAP, lot, réf. BL) vit derrière le « ? ».
+                          Les cartouches (annulation…) sont À DROITE du nom. */}
                       <span className="inline-flex items-center gap-2 min-w-0">
-                        <span className="font-semibold text-foreground truncate text-[14px]">
+                        <span className={`font-semibold truncate text-[14px] ${isVoided(d) ? "line-through text-rose-600 dark:text-rose-400" : "text-foreground"}`}>
                           {d.cardName || d.cardCode}
                         </span>
+                        <CancelBadge d={d} className="align-middle shrink-0" />
                         <InfoHint label="Références" side="right">
                           <span className="block space-y-0.5">
                             <span className="block">Code SAP : <span className="font-mono">{d.cardCode}</span></span>
