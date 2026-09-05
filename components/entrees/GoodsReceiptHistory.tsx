@@ -5,8 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ClipboardList, Search, ChevronRight,
-  AlertTriangle, Truck, X, Ban, Undo2, PackageCheck,
+  AlertTriangle, Truck, X, Ban, Undo2, PackageCheck, Pencil, Check,
 } from "lucide-react";
+import { StarRating } from "@/components/ui/star-rating";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -849,6 +850,51 @@ function ReceiptDetail({
     } finally { setSavingDlc(false); }
   };
 
+  // ── Mode ÉDITION « a posteriori » (petit stylo) — DDM + notes qualité ──
+  // Par défaut le détail se CONSULTE (DDM et étoiles en lecture seule) ; le
+  // crayon bascule DDM et qualité en saisie, pour corriger après coup.
+  const [editing, setEditing] = useState(false);
+  const ddmDisplay = dlcISO
+    ? new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }).format(new Date(dlcISO))
+    : null;
+
+  // ── Notes QUALITÉ (étoiles) du lot, par article — éditables a posteriori ──
+  // Stockées côté TeleVent par (article, lot). Le lot d'une EM = « EM<docNum> »
+  // (receipt.lot), commun à toutes ses lignes ; la note reste PAR ARTICLE.
+  const [qNotes, setQNotes] = useState<Record<string, number | null>>({});
+  const [savingNote, setSavingNote] = useState<string | null>(null);
+  useEffect(() => {
+    const items = [...new Set(receipt.lines.map((l) => l.itemCode).filter(Boolean))];
+    if (!receipt.lot || items.length === 0) { setQNotes({}); return; }
+    let cancelled = false;
+    fetch(`/api/marchandise-notes?lot=${encodeURIComponent(receipt.lot)}&items=${encodeURIComponent(items.join(","))}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: { notes?: Record<string, number> }) => { if (!cancelled) setQNotes(j?.notes ?? {}); })
+      .catch(() => { /* note qualité best-effort */ });
+    return () => { cancelled = true; };
+  }, [receipt.lot, receipt.docEntry, receipt.lines]);
+  const saveNote = async (itemCode: string, rating: number | null) => {
+    const prev = qNotes[itemCode] ?? null;
+    setQNotes((c) => ({ ...c, [itemCode]: rating }));          // optimiste
+    setSavingNote(itemCode);
+    try {
+      const res = await fetch("/api/marchandise-notes", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemCode, lot: receipt.lot, rating }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.ok === false) {
+        setQNotes((c) => ({ ...c, [itemCode]: prev }));
+        toast.error(j.error || "Note qualité non enregistrée");
+        return;
+      }
+      toast.success(rating ? `Qualité ${rating}★ enregistrée` : "Note qualité effacée");
+    } catch (e) {
+      setQNotes((c) => ({ ...c, [itemCode]: prev }));
+      toast.error((e as Error).message);
+    } finally { setSavingNote(null); }
+  };
+
   // Un seul jeu de tailles : le détail ne vit plus qu'en PLEIN ÉCRAN.
   const tbl = "text-[15px]";
   const th = "px-3 py-2.5 text-[11.5px]";
@@ -907,6 +953,19 @@ function ReceiptDetail({
           />
           {savingBl && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         </span>
+        {/* Petit stylo : bascule DDM + notes qualité en édition (correction a posteriori). */}
+        {!isVoided(receipt) && (
+          <button
+            type="button"
+            onClick={() => setEditing((v) => !v)}
+            title={editing ? "Terminer la modification de la DDM et de la qualité" : "Modifier la DDM et la qualité"}
+            aria-pressed={editing}
+            className={`ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 h-9 text-[13px] font-medium transition-colors ${editing ? "border-brand-500 bg-brand-500/10 text-brand-700 dark:text-brand-300" : "border-border text-muted-foreground hover:text-foreground"}`}
+          >
+            {editing ? <Check className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+            {editing ? "Terminer" : "Modifier DDM / qualité"}
+          </button>
+        )}
       </div>
       {receipt.comments && <p className="italic text-muted-foreground text-[13px]">« {receipt.comments} »</p>}
 
@@ -966,18 +1025,34 @@ function ReceiptDetail({
                   <ReturnedBadge line={l} />
                 </div>
               )}
-              {/* DDM (fraîcheur) du lot — sur la ligne, éditable */}
+              {/* DDM (fraîcheur) du lot — lecture seule, éditable via le crayon */}
               <div className="flex items-center gap-2 mt-2 text-[13px]">
                 <span className="text-muted-foreground shrink-0">DDM</span>
-                <input
-                  type="date"
-                  value={dlcInputValue}
-                  onChange={(e) => setDlcISO(e.target.value ? new Date(e.target.value).toISOString() : null)}
-                  onBlur={(e) => saveDlc(e.target.value, l.itemCode)}
-                  className="h-8 rounded-md border border-input bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-                />
+                {editing ? (
+                  <input
+                    type="date"
+                    value={dlcInputValue}
+                    onChange={(e) => setDlcISO(e.target.value ? new Date(e.target.value).toISOString() : null)}
+                    onBlur={(e) => saveDlc(e.target.value, l.itemCode)}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  />
+                ) : (
+                  <span className="tnum text-foreground">{ddmDisplay ?? <span className="text-muted-foreground/50">non saisie</span>}</span>
+                )}
                 <FreshnessBadge dlc={dlcISO} />
                 {savingDlc && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+              </div>
+              {/* Note QUALITÉ (étoiles) — lecture seule, éditable via le crayon */}
+              <div className="flex items-center gap-2 mt-1 text-[13px]">
+                <span className="text-muted-foreground shrink-0">Qualité</span>
+                {editing ? (
+                  <StarRating value={qNotes[l.itemCode] ?? null} onChange={(v) => saveNote(l.itemCode, v)} size="md" ariaLabel={`Note qualité ${dz.fruit}`} />
+                ) : (
+                  (qNotes[l.itemCode] ?? null)
+                    ? <StarRating value={qNotes[l.itemCode]} size="sm" />
+                    : <span className="text-muted-foreground/50">non notée</span>
+                )}
+                {savingNote === l.itemCode && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
               </div>
             </div>
           );
@@ -1005,6 +1080,7 @@ function ReceiptDetail({
               <th className={`text-left font-semibold ${th}`}>Pays</th>
               <th className={`text-left font-semibold ${th}`}>Calibre</th>
               <th className={`text-left font-semibold w-40 ${th}`}>DDM</th>
+              <th className={`text-left font-semibold w-32 ${th}`}>Qualité</th>
               {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>PU HT</th>}
               {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>Total HT</th>}
             </tr>
@@ -1027,18 +1103,35 @@ function ReceiptDetail({
                   <td className={td}><Chip kind="pays">{dz.pays}</Chip></td>
                   <td className={td}>{l.calibre ? <Chip kind="calibre">{l.calibre}</Chip> : null}</td>
                   <td className={td}>
-                    {/* DDM (fraîcheur) du lot — sur la ligne, éditable */}
+                    {/* DDM (fraîcheur) du lot — lecture seule, éditable via le crayon */}
                     <div className="flex items-center gap-1.5">
-                      <input
-                        type="date"
-                        value={dlcInputValue}
-                        onChange={(e) => setDlcISO(e.target.value ? new Date(e.target.value).toISOString() : null)}
-                        onBlur={(e) => saveDlc(e.target.value, l.itemCode)}
-                        className="h-8 rounded-md border border-input bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-                      />
+                      {editing ? (
+                        <input
+                          type="date"
+                          value={dlcInputValue}
+                          onChange={(e) => setDlcISO(e.target.value ? new Date(e.target.value).toISOString() : null)}
+                          onBlur={(e) => saveDlc(e.target.value, l.itemCode)}
+                          className="h-8 rounded-md border border-input bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                        />
+                      ) : (
+                        <span className="tnum text-[13px] text-foreground">{ddmDisplay ?? <span className="text-muted-foreground/50">—</span>}</span>
+                      )}
                       {savingDlc
                         ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
                         : <FreshnessBadge dlc={dlcISO} className="shrink-0" />}
+                    </div>
+                  </td>
+                  <td className={td}>
+                    {/* Note QUALITÉ (étoiles) — lecture seule, éditable via le crayon */}
+                    <div className="flex items-center gap-1.5">
+                      {editing ? (
+                        <StarRating value={qNotes[l.itemCode] ?? null} onChange={(v) => saveNote(l.itemCode, v)} size="md" ariaLabel={`Note qualité ${dz.fruit}`} />
+                      ) : (
+                        (qNotes[l.itemCode] ?? null)
+                          ? <StarRating value={qNotes[l.itemCode]} size="sm" />
+                          : <span className="text-[13px] text-muted-foreground/50">—</span>
+                      )}
+                      {savingNote === l.itemCode && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />}
                     </div>
                   </td>
                   {!restricted && (
@@ -1065,15 +1158,15 @@ function ReceiptDetail({
           {!restricted && (
             <tfoot>
               <tr className="border-t border-border bg-secondary/30">
-                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
+                <td colSpan={10} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
                 <td colSpan={2} className={`text-right tnum font-semibold text-foreground ${td} ${totVal}`}>{eur(totHT)}</td>
               </tr>
               <tr className="bg-secondary/20">
-                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
+                <td colSpan={10} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
                 <td colSpan={2} className={`text-right tnum text-muted-foreground ${td}`}>{eur(totTVA)}</td>
               </tr>
               <tr className="bg-secondary/30 border-t border-border">
-                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
+                <td colSpan={10} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
                 <td colSpan={2} className={`text-right tnum font-bold text-foreground ${td} ${totVal}`}>{eur(totTTC)}</td>
               </tr>
             </tfoot>

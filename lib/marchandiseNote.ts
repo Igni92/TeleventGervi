@@ -86,6 +86,59 @@ export async function getArticleNotes(itemCodes?: string[]): Promise<Map<string,
   return out;
 }
 
+/**
+ * Notes qualité d'UN lot pour PLUSIEURS articles (détail d'une entrée
+ * marchandise : toutes ses lignes partagent le même lot « EM<docNum> », la note
+ * restant par article). Map itemCode → note (1..5).
+ */
+export async function getLotNotesForItems(lot: string, itemCodes: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const cleanLot = (lot ?? "").trim();
+  const codes = [...new Set(itemCodes.map((c) => c.trim()).filter(Boolean))];
+  if (!cleanLot || codes.length === 0) return out;
+  try {
+    const rows = await prisma.appSetting.findMany({
+      where: { key: { in: codes.map((c) => `${LOT_PREFIX}${c}:${cleanLot}`) } },
+    });
+    const suffix = `:${cleanLot}`;
+    for (const row of rows) {
+      const code = row.key.slice(LOT_PREFIX.length, row.key.length - suffix.length);
+      try {
+        const v = JSON.parse(row.value) as { rating?: number };
+        const r = sanitizeRating(v?.rating);
+        if (code && r != null) out.set(code, r);
+      } catch { /* ligne corrompue ignorée */ }
+    }
+  } catch { /* table absente → aucune note */ }
+  return out;
+}
+
+/**
+ * Efface la note qualité d'un lot pour un article (correction a posteriori :
+ * re-clic sur l'étoile courante). Supprime la note du lot, et la note COURANTE
+ * de l'article si elle pointait justement sur ce lot. Best-effort.
+ */
+export async function clearMarchandiseNote(itemCode: string, lot: string | null): Promise<void> {
+  const code = (itemCode ?? "").trim();
+  const cleanLot = lot?.trim() || null;
+  if (!code) return;
+  try {
+    if (cleanLot) {
+      await prisma.appSetting.deleteMany({ where: { key: `${LOT_PREFIX}${code}:${cleanLot}` } });
+    }
+    // La note COURANTE de l'article n'est effacée que si elle vient de ce lot.
+    const art = await prisma.appSetting.findUnique({ where: { key: ART_PREFIX + code } });
+    if (art) {
+      try {
+        const v = JSON.parse(art.value) as ArtNote;
+        if (!cleanLot || (v?.lot ?? null) === cleanLot) {
+          await prisma.appSetting.deleteMany({ where: { key: ART_PREFIX + code } });
+        }
+      } catch { /* valeur illisible → on la supprime */ await prisma.appSetting.deleteMany({ where: { key: ART_PREFIX + code } }); }
+    }
+  } catch { /* best-effort : ne jamais casser l'appelant */ }
+}
+
 /** Notes des LOTS d'un article (détail des lots). Map lot → note (1..5). */
 export async function getLotNotes(itemCode: string, lots: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
