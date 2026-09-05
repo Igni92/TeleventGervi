@@ -66,6 +66,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, leave: created });
   }
 
+  if (action === "post") {
+    // La DIRECTION place directement un salarié en absence (typiquement un
+    // ARRÊT MALADIE) : posé au nom du salarié, validé d'office (origin=direction).
+    if (!c.manager) return NextResponse.json({ error: "Réservé à la direction" }, { status: 403 });
+    const employeeId = String(b.employeeId ?? "");
+    if (!employeeId) return NextResponse.json({ error: "Salarié requis" }, { status: 400 });
+    if (!isLeaveType(b.type)) return NextResponse.json({ error: "type invalide" }, { status: 400 });
+    const start = new Date(String(b.startDate)); const end = new Date(String(b.endDate));
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+      return NextResponse.json({ error: "Dates invalides" }, { status: 400 });
+    }
+    const emp = await prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true } });
+    if (!emp) return NextResponse.json({ error: "Salarié introuvable" }, { status: 404 });
+    const feries = new Set((await prisma.rhHoliday.findMany({ where: { date: { gte: start, lte: end } }, select: { date: true } }))
+      .map((h) => h.date.toISOString().slice(0, 10)));
+    const jours = joursOuvrables(start, end, feries);
+    const created = await prisma.rhLeaveRequest.create({
+      data: {
+        employeeId, type: b.type, statut: "approved", startDate: start, endDate: end, jours,
+        origin: "direction", note: b.note ? String(b.note) : null,
+        decidedBy: c.email, decidedAt: new Date(),
+      },
+    });
+    await prisma.rhEvent.create({ data: { employeeId, type: "absence", date: start, meta: JSON.stringify({ leaveId: created.id, leaveType: b.type, jours, start: start.toISOString(), end: end.toISOString(), origin: "direction" }) } });
+    return NextResponse.json({ ok: true, leave: created });
+  }
+
   if (action === "decide") {
     if (!c.manager) return NextResponse.json({ error: "Réservé à la direction" }, { status: 403 });
     const id = String(b.id ?? "");
