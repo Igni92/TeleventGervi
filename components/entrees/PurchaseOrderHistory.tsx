@@ -37,11 +37,11 @@ function groupByDay<T extends { docDate?: string | null }>(rows: T[]): { key: st
 
 /** Bandeau de jour — en-tête d'un groupe (« JEU 03.09.26 · 4 »). */
 function DayHeader({ label, count }: { label: string; count: number }) {
+  // Groupe de JOUR clair et distinct (barre accentuée + pastille compteur).
   return (
-    <div className="flex items-center gap-2 px-1">
-      <span className="text-[12px] font-bold uppercase tracking-wide text-foreground tnum">{label}</span>
-      <span className="text-[11px] font-semibold text-muted-foreground tnum">· {count}</span>
-      <span className="h-px flex-1 bg-border/70" />
+    <div className="flex items-center gap-2 rounded-lg border-l-4 border-brand-500 bg-brand-500/[0.07] px-2.5 py-2">
+      <span className="text-[13px] font-bold uppercase tracking-wide text-foreground tnum">{label}</span>
+      <span className="inline-flex items-center justify-center rounded-full bg-brand-500/15 px-2 py-0.5 text-[11px] font-bold text-brand-700 dark:text-brand-300 tnum">{count}</span>
     </div>
   );
 }
@@ -295,10 +295,14 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
               <tbody>
                 {dayGroups.map((g) => (
                   <Fragment key={g.key}>
-                    {/* Bandeau de jour — case pleine largeur (JEU 03.09.26 · 4). */}
-                    <tr className="bg-secondary/60">
-                      <td colSpan={restricted ? 6 : 7} className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-foreground tnum border-t border-border">
-                        {g.label} <span className="text-muted-foreground font-semibold">· {g.rows.length}</span>
+                    {/* En-tête de JOUR — groupe clair et distinct (barre accentuée). */}
+                    <tr>
+                      <td colSpan={restricted ? 6 : 7} className="p-0">
+                        <div className="flex items-center gap-2 border-y-2 border-brand-500/30 bg-brand-500/[0.07] px-3 py-2.5">
+                          <span className="h-4 w-1 rounded-full bg-brand-500" />
+                          <span className="text-[13px] font-bold uppercase tracking-wide text-foreground tnum">{g.label}</span>
+                          <span className="ml-1 inline-flex items-center justify-center rounded-full bg-brand-500/15 px-2 py-0.5 text-[11px] font-bold text-brand-700 dark:text-brand-300 tnum">{g.rows.length}</span>
+                        </div>
                       </td>
                     </tr>
                     {g.rows.map((d) => (

@@ -563,9 +563,14 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                 {/* Clic sur la ligne → détail PLEIN ÉCRAN (plus d'accordéon inline). */}
                 {dayGroups.map((g) => (
                   <Fragment key={g.key}>
-                    <tr className="bg-secondary/60">
-                      <td colSpan={restricted ? 7 : 8} className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-foreground tnum border-t border-border">
-                        {g.label} <span className="text-muted-foreground font-semibold">· {g.rows.length}</span>
+                    {/* En-tête de JOUR — groupe clair et distinct (barre accentuée). */}
+                    <tr>
+                      <td colSpan={restricted ? 7 : 8} className="p-0">
+                        <div className="flex items-center gap-2 border-y-2 border-brand-500/30 bg-brand-500/[0.07] px-3 py-2.5">
+                          <span className="h-4 w-1 rounded-full bg-brand-500" />
+                          <span className="text-[13px] font-bold uppercase tracking-wide text-foreground tnum">{g.label}</span>
+                          <span className="ml-1 inline-flex items-center justify-center rounded-full bg-brand-500/15 px-2 py-0.5 text-[11px] font-bold text-brand-700 dark:text-brand-300 tnum">{g.rows.length}</span>
+                        </div>
                       </td>
                     </tr>
                     {g.rows.map((d) => (
