@@ -116,6 +116,27 @@ export function PurchaseOrderEditor({
   const [cancelling, setCancelling] = useState(false);
   const [receiveMode, setReceiveMode] = useState(false); // agréage ouvert
   const [processing, setProcessing] = useState(false);   // réception en cours
+  const [savingRef, setSavingRef] = useState(false);     // n° de commande (réf.)
+
+  // Le N° de commande (réf. / NumAtCard) est TOUJOURS modifiable, même sur une CF
+  // reçue/close (correction toujours possible). Save-on-blur via PATCH dédié.
+  async function saveReference(v: string) {
+    if (!po) return; // création : la réf. part avec le POST
+    const next = v.trim();
+    if (next === (po.numAtCard ?? "")) return;
+    setSavingRef(true);
+    try {
+      const res = await fetch("/api/sap/purchase-orders", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: po.docEntry, numAtCard: next }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.ok === false) throw new Error(j.error || "Échec");
+      toast.success(`N° de commande enregistré sur la CF n°${po.docNum}`);
+      await onModified?.();
+    } catch (e) { toast.error(`Échec du n° de commande : ${e instanceof Error ? e.message : ""}`); }
+    finally { setSavingRef(false); }
+  }
 
   // Re-synchronise si la commande passée change (rechargement parent après modif).
   useEffect(() => {
@@ -282,13 +303,12 @@ export function PurchaseOrderEditor({
           )}
         </div>
         <div className="space-y-1.5 sm:col-span-2">
-          <label className={LABEL}>Référence Cde achat</label>
-          {readOnlyHeader ? (
-            <div className="flex h-10 items-center rounded-md border border-input bg-background px-3 text-body">
-              {reference || <span className="text-muted-foreground">—</span>}
-            </div>
-          ) : (
+          <label className={LABEL}>N° de commande (réf.)</label>
+          {isNew ? (
             <Input value={reference} onChange={(e) => { setReference(e.target.value); setDirty(true); }} placeholder="N° interne / réf. fournisseur" />
+          ) : (
+            // CF existante : toujours modifiable (même reçue), enregistré au blur.
+            <Input value={reference} disabled={savingRef} onChange={(e) => setReference(e.target.value)} onBlur={(e) => saveReference(e.target.value)} placeholder="N° interne / réf. fournisseur" className="disabled:opacity-60" />
           )}
         </div>
         <div className="space-y-1.5 sm:col-span-2">

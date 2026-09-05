@@ -268,3 +268,28 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
 }
+
+/**
+ * PATCH /api/sap/purchase-orders — modifie le N° DE COMMANDE (réf. / NumAtCard)
+ * d'une commande fournisseur EXISTANTE, à tout moment (même reçue/close) — le n°
+ * de commande doit toujours pouvoir être corrigé. Body : { docEntry, numAtCard }.
+ */
+export async function PATCH(req: NextRequest) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await requirePreparateurOrAdmin(session))) return NextResponse.json({ error: "Réservé à la préparation / l'administration" }, { status: 403 });
+
+  let body: { docEntry?: number; numAtCard?: string };
+  try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+  const docEntry = Number(body.docEntry);
+  if (!docEntry || Number.isNaN(docEntry)) return NextResponse.json({ error: "docEntry requis" }, { status: 400 });
+  const numAtCard = (body.numAtCard ?? "").trim().slice(0, 100);
+
+  try {
+    await sap.patch(`PurchaseOrders(${docEntry})`, { NumAtCard: numAtCard });
+    bustCache("po:"); bustCache("cf:");
+    return NextResponse.json({ ok: true, numAtCard });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  }
+}
